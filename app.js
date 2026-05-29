@@ -9,7 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentFolder: 'INBOX',
         emails: [],
         selectedEmailId: null,
-        unreadCount: 0
+        unreadCount: 0,
+        folderCache: {} // Cache for flicker-free folder switching
     };
 
     function getBaseId(id) {
@@ -100,6 +101,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCompose = document.getElementById('btn-compose');
     const btnRefresh = document.getElementById('btn-refresh');
     const btnLogout = document.getElementById('btn-logout');
+
+    // --- 영문 입력 유도 및 제한 로직 추가 ---
+    const englishOnlyFields = ['login-username', 'reg-username'];
+    englishOnlyFields.forEach(id => {
+        const field = document.getElementById(id);
+        if (field) {
+            field.addEventListener('input', function() {
+                // 영문, 숫자, 특수기호 일부(._-)만 허용하고 나머지는 제거 (특히 한글 방지)
+                this.value = this.value.replace(/[^a-zA-Z0-9._-]/g, '');
+            });
+        }
+    });
     const btnAdmin = document.getElementById('btn-admin');
     const btnSettings = document.getElementById('user-profile-trigger');
     const settingsModal = document.getElementById('settings-modal');
@@ -549,9 +562,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // MAIL ACTIONS (LIST, READ, DELETE, SEND)
     // --------------------------------------------------
     async function loadEmails(folder, showLoading = true) {
+        const isSameFolder = (state.currentFolder === folder);
         state.currentFolder = folder;
         syncActiveFolderUI();
         folderTitle.textContent = getFolderDisplayName(folder);
+
+        // Pre-apply saved height to prevent jumping
+        const savedFolderHeight = getCookie('listHeight_' + folder);
+        if (savedFolderHeight) {
+            listHeight = parseInt(savedFolderHeight);
+            mailListPane.style.height = `${listHeight}px`;
+        }
         
         const btnEmptyTrash = document.getElementById('btn-empty-trash');
         if (btnEmptyTrash) {
@@ -567,10 +588,19 @@ document.addEventListener('DOMContentLoaded', () => {
             btnRefresh.classList.add('refreshing');
         }
 
-        // Only fade out if switching folder or container has no list yet
-        const isSameFolder = (state.currentFolder === folder);
+        // --- Flicker-free logic ---
         const hasExistingList = mailContainer.querySelector('.mail-list-table') !== null;
-        const shouldFade = showLoading && (!isSameFolder || !hasExistingList);
+        
+        // Use cache if available for this folder
+        if (!isSameFolder && state.folderCache[folder]) {
+            state.emails = state.folderCache[folder];
+            renderMailList();
+            // Don't show full loading overlay if we have cached content to show
+            showLoading = false;
+        }
+
+        // Only fade out if no cache and we are switching folders
+        const shouldFade = showLoading && !isSameFolder && !state.folderCache[folder];
 
         if (shouldFade) {
             mailContainer.classList.add('loading');
@@ -581,7 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await apiRequest('list_emails', 'GET', { folder });
         
         const elapsed = Date.now() - startTime;
-        const minDuration = 1000;
+        const minDuration = (isSameFolder || state.folderCache[folder]) ? 300 : 1000;
         const delay = Math.max(0, minDuration - elapsed);
         
         setTimeout(() => {
@@ -592,97 +622,121 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (res.success) {
             const nextEmails = res.emails || [];
+            state.folderCache[folder] = nextEmails; // Update cache
+            
             const tbody = mailContainer.querySelector('#mail-list-tbody');
             
-            if (isSameFolder && hasExistingList && tbody) {
-                // Calculate simple email addition
-                const oldEmailIds = new Set(state.emails.map(e => e.id));
-                const newEmails = nextEmails.filter(e => !oldEmailIds.has(e.id));
+            // If we're still on the same folder we requested, update UI
+            if (state.currentFolder === folder) {
+                const canDoPartialUpdate = hasExistingList && tbody;
                 
-                const oldEmailsStillExist = state.emails.every(e => nextEmails.some(ne => ne.id === e.id));
-                const isSimpleAddition = newEmails.length > 0 && oldEmailsStillExist && (newEmails.length + state.emails.length === nextEmails.length);
-                
-                if (isSimpleAddition) {
-                    // Prepend new emails with slide animation
-                    for (let i = newEmails.length - 1; i >= 0; i--) {
-                        const email = newEmails[i];
-                        const tr = document.createElement('tr');
-                        const isSelected = getBaseId(email.id) === getBaseId(state.selectedEmailId);
-                        const isSeen = email.seen || isSelected;
-                        
-                        tr.className = `mail-item new-mail-item ${isSeen ? '' : 'unread'} ${isSelected ? 'selected' : ''}`;
-                        tr.dataset.id = email.id;
-                        
-                        const dateStr = formatDate(email.timestamp);
-                        const cleanFrom = escapeHtml(email.from);
-                        tr.innerHTML = `
-                            <td class="col-chk" onclick="event.stopPropagation();">
-                                <input type="checkbox" class="mail-item-chk" data-id="${email.id}" data-from="${escapeHtml(email.from)}" data-folder="${email.folder}">
-                            </td>
-                            <td class="col-flag" onclick="event.stopPropagation();">
-                                <button type="button" class="star-btn ${email.flagged ? 'flagged' : ''}" data-id="${email.id}">
-                                    <i class="${email.flagged ? 'fa-solid' : 'fa-regular'} fa-star"></i>
-                                </button>
-                            </td>
-                            <td class="col-sender">${cleanFrom}</td>
-                            <td class="col-subject">
-                                ${isSeen ? '' : '<span class="unread-dot"></span> '}
-                                ${escapeHtml(email.subject)}
-                            </td>
-                            <td class="col-snippet">${escapeHtml(email.snippet || '')}</td>
-                            <td class="col-date">${dateStr}</td>
-                        `;
-                        
-                        tr.addEventListener('click', () => selectEmail(email.id));
-                        const chk = tr.querySelector('.mail-item-chk');
-                        if (chk) {
-                            chk.addEventListener('change', (e) => {
-                                tr.classList.toggle('checked', e.target.checked);
-                            });
-                        }
-                        tr.addEventListener('contextmenu', (e) => {
-                            e.preventDefault();
-                            showMailContextMenu(e, email.id);
-                        });
-                        
-                        const starBtn = tr.querySelector('.star-btn');
-                        if (starBtn) {
-                            starBtn.addEventListener('click', async (evt) => {
-                                evt.stopPropagation();
-                                const emailId = starBtn.dataset.id;
-                                const res = await apiRequest('toggle_flag', 'POST', { folder: email.folder, id: emailId });
-                                if (res.success) {
-                                    const flagged = res.flagged;
-                                    starBtn.classList.toggle('flagged', flagged);
-                                    const icon = starBtn.querySelector('i');
-                                    icon.className = flagged ? 'fa-solid fa-star' : 'fa-regular fa-star';
-                                    
-                                    const emailInState = state.emails.find(e => e.id === emailId);
-                                    if (emailInState) {
-                                        emailInState.flagged = flagged;
-                                        emailInState.id = res.new_id;
-                                    }
-                                    starBtn.dataset.id = res.new_id;
-                                    tr.dataset.id = res.new_id;
-                                    tr.querySelector('.mail-item-chk').dataset.id = res.new_id;
-                                    if (state.selectedEmailId === emailId) {
-                                        state.selectedEmailId = res.new_id;
-                                    }
-                                }
-                            });
-                        }
-                        
-                        tbody.insertBefore(tr, tbody.firstChild);
-                        
-                        setTimeout(() => {
-                            tr.classList.remove('new-mail-item');
-                        }, 1000);
-                    }
+                if (canDoPartialUpdate) {
+                    // Calculate simple email addition
+                    const oldEmailIds = new Set(state.emails.map(e => e.id));
+                    const newEmails = nextEmails.filter(e => !oldEmailIds.has(e.id));
                     
-                    state.emails = nextEmails;
-                    updateGlobalUnreadCount();
+                    const oldEmailsStillExist = state.emails.every(e => nextEmails.some(ne => ne.id === e.id));
+                    const isSimpleAddition = newEmails.length > 0 && oldEmailsStillExist && (newEmails.length + state.emails.length === nextEmails.length);
+                    
+                    if (isSimpleAddition) {
+                        // Prepend new emails with slide animation
+                        for (let i = newEmails.length - 1; i >= 0; i--) {
+                            const email = newEmails[i];
+                            const tr = document.createElement('tr');
+                            const isSelected = getBaseId(email.id) === getBaseId(state.selectedEmailId);
+                            const isSeen = email.seen || isSelected;
+
+                            tr.className = `mail-item ${isSeen ? '' : 'unread'} ${isSelected ? 'selected' : ''}`;
+                            tr.dataset.id = email.id;
+
+                            const dateStr = formatDate(email.timestamp);
+                            const cleanFrom = escapeHtml(email.from);
+                            tr.innerHTML = `
+                                <td class="col-chk" onclick="event.stopPropagation();">
+                                    <input type="checkbox" class="mail-item-chk" data-id="${email.id}" data-from="${escapeHtml(email.from)}" data-folder="${email.folder}">
+                                </td>
+                                <td class="col-flag" onclick="event.stopPropagation();">
+                                    <button type="button" class="star-btn ${email.flagged ? 'flagged' : ''}" data-id="${email.id}">
+                                        <i class="${email.flagged ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+                                    </button>
+                                </td>
+                                <td class="col-sender">${cleanFrom}</td>
+                                <td class="col-subject">
+                                    ${isSeen ? '' : '<span class="unread-dot"></span> '}
+                                    ${escapeHtml(email.subject)}
+                                </td>
+                                <td class="col-snippet">${escapeHtml(email.snippet || '')}</td>
+                                <td class="col-date">${dateStr}</td>
+                            `;
+
+                            tr.addEventListener('click', () => selectEmail(email.id));
+                            const chk = tr.querySelector('.mail-item-chk');
+                            if (chk) {
+                                chk.addEventListener('change', (e) => {
+                                    tr.classList.toggle('checked', e.target.checked);
+                                });
+                            }
+                            tr.addEventListener('contextmenu', (e) => {
+                                e.preventDefault();
+                                showMailContextMenu(e, email.id);
+                            });
+
+                            const starBtn = tr.querySelector('.star-btn');
+                            if (starBtn) {
+                                starBtn.addEventListener('click', async (evt) => {
+                                    evt.stopPropagation();
+                                    const emailId = starBtn.dataset.id;
+                                    const res = await apiRequest('toggle_flag', 'POST', { folder: email.folder, id: emailId });
+                                    if (res.success) {
+                                        const flagged = res.flagged;
+                                        starBtn.classList.toggle('flagged', flagged);
+                                        const icon = starBtn.querySelector('i');
+                                        icon.className = flagged ? 'fa-solid fa-star' : 'fa-regular fa-star';
+
+                                        const emailInState = state.emails.find(e => e.id === emailId);
+                                        if (emailInState) {
+                                            emailInState.flagged = flagged;
+                                            emailInState.id = res.new_id;
+                                        }
+                                        starBtn.dataset.id = res.new_id;
+                                        tr.dataset.id = res.new_id;
+                                        tr.querySelector('.mail-item-chk').dataset.id = res.new_id;
+                                        if (state.selectedEmailId === emailId) {
+                                            state.selectedEmailId = res.new_id;
+                                        }
+                                    }
+                                });
+                            }
+
+                            tbody.insertBefore(tr, tbody.firstChild);
+                            }
+                        
+                        state.emails = nextEmails;
+                        updateGlobalUnreadCount();
+                    } else {
+                        // Full render but without visible flicker/fading
+                        // Check if anything actually changed (IDs, seen status, flagged status, etc.)
+                        const isIdentical = state.emails.length === nextEmails.length && 
+                                            state.emails.every((e, i) => 
+                                                e.id === nextEmails[i].id && 
+                                                e.seen === nextEmails[i].seen && 
+                                                e.flagged === nextEmails[i].flagged &&
+                                                e.subject === nextEmails[i].subject &&
+                                                e.timestamp === nextEmails[i].timestamp
+                                            );
+
+                        if (!isIdentical) {
+                            state.emails = nextEmails;
+                            if (showLoading) {
+                                state.selectedEmailId = null;
+                                if (readerContent) readerContent.classList.add('hidden');
+                                if (readerEmpty) readerEmpty.classList.remove('hidden');
+                            }
+                            renderMailList();
+                        }
+                        updateGlobalUnreadCount();
+                    }
                 } else {
-                    // Full render but without visible flicker/fading if same folder
                     state.emails = nextEmails;
                     if (showLoading) {
                         state.selectedEmailId = null;
@@ -692,15 +746,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderMailList();
                     updateGlobalUnreadCount();
                 }
-            } else {
-                state.emails = nextEmails;
-                if (showLoading) {
-                    state.selectedEmailId = null;
-                    if (readerContent) readerContent.classList.add('hidden');
-                    if (readerEmpty) readerEmpty.classList.remove('hidden');
-                }
-                renderMailList();
-                updateGlobalUnreadCount();
             }
             
             if (mailContainer.classList.contains('loading')) {
@@ -708,23 +753,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 mailContainer.classList.remove('loading');
             }
             
-            // Trigger a soft flash effect on refresh (only if it wasn't a full folder loading transition)
-            if (!shouldFade) {
-                const table = mailContainer.querySelector('.mail-list-table');
-                if (table) {
-                    table.classList.add('flash-refresh');
-                    setTimeout(() => {
-                        table.classList.remove('flash-refresh');
-                    }, 800);
-                }
-            }
-            
-            // Adjust partition height
+            // Adjust partition height only if NOT saved
             const savedFolderHeight = getCookie('listHeight_' + folder);
-            if (savedFolderHeight) {
-                listHeight = parseInt(savedFolderHeight);
-                mailListPane.style.height = `${listHeight}px`;
-            } else {
+            if (!savedFolderHeight) {
                 if (state.emails.length <= 5) {
                     setTimeout(() => {
                         const paneHeader = mailListPane.querySelector('.pane-header');
@@ -820,7 +851,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         filtered.forEach((email, index) => {
             const tr = document.createElement('tr');
-            tr.style.animationDelay = `${index * 15}ms`;
             const isSelected = getBaseId(email.id) === getBaseId(state.selectedEmailId);
             const isSeen = email.seen || isSelected;
             tr.className = `mail-item ${isSeen ? '' : 'unread'} ${isSelected ? 'selected' : ''}`;
@@ -1551,7 +1581,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCompose.addEventListener('click', () => openCompose());
     if (btnCloseCompose) btnCloseCompose.addEventListener('click', () => composeModal.classList.add('hidden'));
     
-    btnRefresh.addEventListener('click', () => loadEmails(state.currentFolder));
+    btnRefresh.addEventListener('click', () => loadEmails(state.currentFolder, false));
     
     const btnEmptyTrash = document.getElementById('btn-empty-trash');
     if (btnEmptyTrash) {
@@ -2044,15 +2074,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const resizerSidebar = document.getElementById('resizer-sidebar');
     const resizerList = document.getElementById('resizer-list');
     
-    let sidebarWidth = 280;
+    let sidebarWidth = 300;
     let listHeight = 290;
     let sidebarCollapsed = false;
 
-    // Double click Sidebar Resizer to restore default state (280px)
+    // Double click Sidebar Resizer to restore default state (300px)
     resizerSidebar.addEventListener('dblclick', () => {
         sidebarCollapsed = false;
         sidebar.classList.remove('collapsed');
-        sidebarWidth = 280;
+        sidebarWidth = 300;
         sidebar.style.width = `${sidebarWidth}px`;
         
         const tagsPopover = document.getElementById('tags-popover');

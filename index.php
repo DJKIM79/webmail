@@ -195,14 +195,14 @@
                     <label for="login-username">아이디 (Domain: @onto.kr)</label>
                     <div class="input-icon">
                         <i class="fa-solid fa-user"></i>
-                        <input type="text" id="login-username" name="username" placeholder="아이디만 입력" required autocomplete="username">
+                        <input type="text" id="login-username" name="username" placeholder="아이디만 입력" required autocomplete="username" inputmode="url" autocorrect="off" autocapitalize="none">
                     </div>
                 </div>
                 <div class="form-group">
                     <label for="login-password">암호</label>
                     <div class="input-icon">
                         <i class="fa-solid fa-lock"></i>
-                        <input type="password" id="login-password" name="password" placeholder="암호 입력" required autocomplete="current-password">
+                        <input type="password" id="login-password" name="password" placeholder="암호 입력" required autocomplete="current-password" autocorrect="off" autocapitalize="none">
                     </div>
                 </div>
                 <div class="form-group keep-logged-in-wrapper">
@@ -219,40 +219,48 @@
                 </div>
                 <input type="hidden" name="form_load_time" id="form-load-time">
 
-                <div class="form-group">
-                    <label for="reg-username">신청할 아이디 (메일 주소: ID@onto.kr)</label>
-                    <div class="input-icon">
-                        <i class="fa-solid fa-user-plus"></i>
-                        <input type="text" id="reg-username" name="username" placeholder="아이디만 입력" required>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="reg-username">아이디</label>
+                        <div class="input-icon">
+                            <i class="fa-solid fa-user-plus"></i>
+                            <input type="text" id="reg-username" name="username" placeholder="아이디 입력" required inputmode="url" autocorrect="off" autocapitalize="none">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-password">암호</label>
+                        <div class="input-icon">
+                            <i class="fa-solid fa-lock"></i>
+                            <input type="password" id="reg-password" name="password" placeholder="암호 입력" required autocorrect="off" autocapitalize="none">
+                        </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="reg-name">이름</label>
-                    <div class="input-icon">
-                        <i class="fa-solid fa-signature"></i>
-                        <input type="text" id="reg-name" name="name" placeholder="실명 또는 닉네임" required>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="reg-name">이름</label>
+                        <div class="input-icon">
+                            <i class="fa-solid fa-signature"></i>
+                            <input type="text" id="reg-name" name="name" placeholder="실명 입력" required>
+                        </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="reg-password">암호</label>
-                    <div class="input-icon">
-                        <i class="fa-solid fa-lock"></i>
-                        <input type="password" id="reg-password" name="password" placeholder="암호 입력" required>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>봇 방지 코드</label>
+                        <div class="captcha-row">
+                            <div class="captcha-container">
+                                <img id="captcha-img" src="bot_check.php" alt="Bot Check Challenge">
+                                <button type="button" id="btn-reload-captcha" class="btn-reload" title="새로고침">
+                                    <i class="fa-solid fa-rotate"></i>
+                                </button>
+                            </div>
+                            <input type="number" id="reg-captcha" name="captcha" class="captcha-input-plain" placeholder="답 입력" required>
+                        </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>봇 방지 코드</label>
-                    <div class="captcha-container">
-                        <img id="captcha-img" src="bot_check.php" alt="Bot Check Challenge">
-                        <button type="button" id="btn-reload-captcha" class="btn-reload" title="새로고침">
-                            <i class="fa-solid fa-rotate"></i>
-                        </button>
-                    </div>
-                    <div class="input-icon" style="margin-top: 8px;">
-                        <i class="fa-solid fa-square-check"></i>
-                        <input type="number" id="reg-captcha" name="captcha" placeholder="질문의 답(숫자)을 입력하세요" required>
-                    </div>
-                </div>
+                
                 <button type="submit" class="btn-submit">가입 신청</button>
             </form>
         </div>
@@ -518,7 +526,7 @@
                             <label for="set-password">암호</label>
                             <div class="input-icon">
                                 <i class="fa-solid fa-lock"></i>
-                                <input type="password" id="set-password" name="password" placeholder="새 암호 입력 (변경할 경우만)">
+                                <input type="password" id="set-password" name="password" placeholder="암호 변경(필요시)">
                             </div>
                         </div>
                     </div>

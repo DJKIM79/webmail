@@ -1077,15 +1077,23 @@ switch ($action) {
             respond(false, '관리자 본인 계정은 삭제할 수 없습니다.');
         }
         
+        // 1. Delete physical mail data and server settings via shell script
         $email = $user['username'] . '@onto.kr';
         $cmd = "sudo /usr/local/bin/manage_mail_user.sh delete " . escapeshellarg($email);
         
+        $output = [];
+        $return_val = 0;
         exec($cmd, $output, $return_val);
         
+        // 2. Delete user record from database (includes profile_pic Base64)
         $stmt = $db->prepare("DELETE FROM users WHERE id = :id");
         $stmt->execute([':id' => $id]);
         
-        respond(true, '사용자 계정이 삭제되었습니다.');
+        if ($return_val === 0) {
+            respond(true, '사용자 계정 및 모든 관련 데이터(메일, 폴더 등)가 영구 삭제되었습니다.');
+        } else {
+            respond(true, '사용자 계정은 삭제되었으나, 일부 물리 데이터 삭제 중 오류가 발생했을 수 있습니다. 관리자에게 문의하세요.');
+        }
         break;
 
     case 'admin_create_user':
