@@ -10,7 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
         emails: [],
         selectedEmailId: null,
         unreadCount: 0,
-        folderCache: {} // Cache for flicker-free folder switching
+        folderCache: {}, // Cache for flicker-free folder switching
+        tagColors: {} // Custom colors for personal folders
     };
 
     function getBaseId(id) {
@@ -24,6 +25,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function getFolderColor(folderName) {
         if (!folderName) return 'var(--text-secondary)';
         
+        // Custom color from state
+        if (state.tagColors && state.tagColors[folderName]) {
+            return state.tagColors[folderName];
+        }
+
         // Default system folders
         if (folderName === 'INBOX') return '#3b82f6'; // Blue
         if (folderName === 'Sent') return '#10b981'; // Green
@@ -39,16 +45,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Premium color palette for personal folders
         const colors = [
-            '#3b82f6', // Blue
-            '#10b981', // Emerald
-            '#8b5cf6', // Violet
-            '#ec4899', // Pink
-            '#f59e0b', // Amber
-            '#06b6d4', // Cyan
-            '#f97316', // Orange
-            '#14b8a6', // Teal
-            '#a855f7', // Purple
-            '#e11d48'  // Rose
+            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
+            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
         ];
         
         const index = Math.abs(hash) % colors.length;
@@ -318,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --------------------------------------------------
     // CUSTOM CONFIRM DIALOG
     // --------------------------------------------------
-    function customConfirm(message) {
+    function customConfirm(message, iconClass = 'fa-solid fa-circle-question') {
         return new Promise((resolve) => {
             const backdrop = document.createElement('div');
             backdrop.className = 'confirm-overlay';
@@ -328,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             card.innerHTML = `
                 <div class="confirm-body">
-                    <i class="fa-solid fa-circle-question confirm-icon"></i>
+                    <i class="${iconClass} confirm-icon"></i>
                     <p class="confirm-message"></p>
                 </div>
                 <div class="confirm-footer">
@@ -337,7 +335,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             
-            card.querySelector('.confirm-message').textContent = message;
+            const msgEl = card.querySelector('.confirm-message');
+            if (message.includes('\n')) {
+                msgEl.innerHTML = message.replace(/\n/g, '<br>');
+            } else {
+                msgEl.textContent = message;
+            }
             backdrop.appendChild(card);
             document.body.appendChild(backdrop);
             
@@ -592,14 +595,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const isSameFolder = (state.currentFolder === folder);
         state.currentFolder = folder;
         syncActiveFolderUI();
-        folderTitle.textContent = getFolderDisplayName(folder);
+        folderTitle.innerHTML = `<span style="margin-right:8px; opacity:0.8;">${getFolderIcon(folder)}</span>${getFolderDisplayName(folder)}`;
 
-        // Pre-apply saved height to prevent jumping
-        const savedFolderHeight = getCookie('listHeight_' + folder);
-        if (savedFolderHeight) {
-            listHeight = parseInt(savedFolderHeight);
-            mailListPane.style.height = `${listHeight}px`;
-        }
+        // Apply global saved height
+        const globalSavedHeight = getCookie('listHeight');
+        listHeight = globalSavedHeight ? parseInt(globalSavedHeight) : 320;
+        mailListPane.style.height = `${listHeight}px`;
         
         const btnEmptyTrash = document.getElementById('btn-empty-trash');
         if (btnEmptyTrash) {
@@ -689,11 +690,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </td>
                                 <td class="col-sender">${cleanFrom}</td>
                                 <td class="col-subject">
-                                    ${isSeen ? '' : '<span class="unread-dot"></span> '}
+                                    ${isSeen ? '<i class="fa-regular fa-envelope-open" style="margin-right:8px; opacity:0.5; font-size: 13px;"></i>' : '<i class="fa-solid fa-envelope" style="margin-right:8px; color: var(--color-primary); font-size: 13px;"></i>'}
                                     ${escapeHtml(email.subject)}
                                 </td>
                                 <td class="col-snippet">${escapeHtml(email.snippet || '')}</td>
                                 <td class="col-date">${dateStr}</td>
+                                <td class="col-filler"></td>
                             `;
 
                             tr.addEventListener('click', () => selectEmail(email.id));
@@ -705,6 +707,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             tr.addEventListener('contextmenu', (e) => {
                                 e.preventDefault();
+                                selectEmail(email.id);
                                 showMailContextMenu(e, email.id);
                             });
 
@@ -779,40 +782,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 mailContainer.offsetHeight;
                 mailContainer.classList.remove('loading');
             }
-            
-            // Adjust partition height only if NOT saved
-            const savedFolderHeight = getCookie('listHeight_' + folder);
-            if (!savedFolderHeight) {
-                if (state.emails.length <= 5) {
-                    setTimeout(() => {
-                        const paneHeader = mailListPane.querySelector('.pane-header');
-                        const table = mailListPane.querySelector('.mail-list-table');
-                        const emptyMsg = mailListPane.querySelector('.list-empty');
-                        
-                        let targetHeight = 320;
-                        const headerH = paneHeader ? paneHeader.offsetHeight : 55;
-                        
-                        if (table) {
-                            const tableH = table.offsetHeight;
-                            targetHeight = headerH + tableH + 4;
-                        } else if (emptyMsg) {
-                            const emptyH = emptyMsg.offsetHeight;
-                            targetHeight = headerH + emptyH + 10;
-                        }
-                        
-                        if (targetHeight < 70) targetHeight = 70;
-                        listHeight = targetHeight;
-                        mailListPane.style.height = `${targetHeight}px`;
-                    }, 0);
-                } else {
-                    const globalSavedHeight = getCookie('listHeight');
-                    listHeight = globalSavedHeight ? parseInt(globalSavedHeight) : 320;
-                    mailListPane.style.height = `${listHeight}px`;
-                }
-            }
         } else {
             showToast(res.message);
             mailContainer.classList.remove('loading');
+        }
+    }
+
+    function getFolderIcon(folder) {
+        switch (folder) {
+            case 'INBOX': return '<i class="fa-solid fa-inbox"></i>';
+            case 'Starred': return '<i class="fa-solid fa-star" style="color: var(--color-warning);"></i>';
+            case 'Sent': return '<i class="fa-solid fa-paper-plane"></i>';
+            case 'Drafts': return '<i class="fa-solid fa-file-signature"></i>';
+            case 'Trash': return '<i class="fa-solid fa-trash-can"></i>';
+            default: return '<i class="fa-solid fa-folder-open"></i>';
         }
     }
 
@@ -830,8 +813,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderMailList() {
         const query = mailSearch.value.trim().toLowerCase();
         const filtered = state.emails.filter(email => {
-            return email.subject.toLowerCase().includes(query) || 
-                   email.from.toLowerCase().includes(query);
+            const s = email.subject.toLowerCase();
+            const f = email.from.toLowerCase();
+            const t = (email.to || "").toLowerCase();
+            const c = (email.cc || "").toLowerCase();
+            return s.includes(query) || f.includes(query) || t.includes(query) || c.includes(query);
         });
 
         const mainContent = document.getElementById('main-content');
@@ -869,6 +855,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <th class="col-subject" style="width: ${colWidths.subject}px;">제목</th>
                     <th class="col-snippet" style="width: ${colWidths.snippet}px;">내용</th>
                     <th class="col-date" style="width: ${colWidths.date}px;">시간</th>
+                    <th class="col-filler" style="width: auto;"></th>
                 </tr>
             </thead>
             <tbody id="mail-list-tbody"></tbody>
@@ -896,11 +883,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td class="col-sender">${cleanFrom}</td>
                 <td class="col-subject">
-                    ${isSeen ? '' : '<span class="unread-dot"></span> '}
+                    ${isSeen ? '<i class="fa-regular fa-envelope-open" style="margin-right:8px; opacity:0.5; font-size: 13px;"></i>' : '<i class="fa-solid fa-envelope" style="margin-right:8px; color: var(--color-primary); font-size: 13px;"></i>'}
                     ${escapeHtml(email.subject)}
                 </td>
                 <td class="col-snippet">${escapeHtml(email.snippet || '')}</td>
                 <td class="col-date">${dateStr}</td>
+                <td class="col-filler"></td>
             `;
 
             tr.addEventListener('click', () => selectEmail(email.id));
@@ -913,6 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             tr.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
+                selectEmail(email.id);
                 showMailContextMenu(e, email.id);
             });
             
@@ -1012,17 +1001,26 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await apiRequest('list_tags');
             if (res.success) {
                 const tags = res.tags || [];
+                
+                // Update tagColors state
+                state.tagColors = {};
+                tags.forEach(t => {
+                    if (t.color) state.tagColors[t.name] = t.color;
+                });
+
                 sidebarTagsContainer.innerHTML = '';
                 
                 // When no personal folders exist, do not display anything continuously
                 if (tags.length === 0) {
+                    sidebarTagsContainer.innerHTML = '<div style="padding: 10px 16px; color: var(--text-secondary); font-size: 12px; text-align: center;">생성된 폴더가 없습니다.</div>';
                     return;
                 }
                 
-                tags.forEach(tag => {
+                tags.forEach(t => {
+                    const tag = t.name;
                     const a = document.createElement('a');
                     a.href = '#';
-                    a.className = `tag-item ${tag === state.currentFolder ? 'active' : ''}`;
+                    a.className = `tag-item nav-item ${tag === state.currentFolder ? 'active' : ''}`;
                     a.dataset.folder = tag;
                     const folderColor = getFolderColor(tag);
                     a.innerHTML = `
@@ -1045,6 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Keep UI classes synchronized
                 syncActiveFolderUI();
+                renderTagsPopoverList(tags);
             } else {
                 console.error('Failed to load tags:', res.message);
             }
@@ -1125,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await apiRequest('read_email', 'GET', { folder: actualFolder, id });
         if (res.success && res.email) {
             const email = res.email;
-            readSubject.textContent = email.subject;
+            readSubject.innerHTML = `<i class="fa-regular fa-envelope" style="margin-right: 12px; opacity: 0.5; font-size: 0.9em;"></i>${escapeHtml(email.subject)}`;
             readFrom.textContent = email.from;
             readTo.textContent = email.to;
             readDate.textContent = email.date;
@@ -1252,7 +1251,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const noConfirmDelete = (actualFolder === 'INBOX' || !['Sent', 'Drafts', 'Trash'].includes(actualFolder));
         if (!noConfirmDelete) {
-            if (!await customConfirm('이 메일을 삭제하시겠습니까?')) return;
+            let msg = '이 메일을 삭제하시겠습니까?';
+            if (actualFolder === 'Trash') {
+                msg = '1개의 메일을 영구 삭제하시겠습니까?\n삭제된 이후에는 복구할 수 없습니다.';
+            }
+            if (!await customConfirm(msg, 'fa-solid fa-triangle-exclamation')) return;
         }
         
         const res = await apiRequest('delete_email', 'POST', { folder: actualFolder, id });
@@ -1592,7 +1595,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         adminUserList.querySelectorAll('.btn-admin-action.delete').forEach(btn => {
             btn.onclick = async () => {
-                if (!await customConfirm('이 계정을 삭제하시겠습니까? 메일 연동이 중지됩니다.')) return;
+                if (!await customConfirm('이 계정을 삭제하시겠습니까? 메일 연동이 중지됩니다.', 'fa-solid fa-triangle-exclamation')) return;
                 const id = btn.dataset.id;
                 showToast('삭제 중...');
                 const r = await apiRequest('admin_delete', 'POST', { id });
@@ -1613,7 +1616,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnEmptyTrash = document.getElementById('btn-empty-trash');
     if (btnEmptyTrash) {
         btnEmptyTrash.addEventListener('click', async () => {
-            if (await customConfirm('휴지통의 모든 메일을 영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+            if (await customConfirm('휴지통의 모든 메일을 영구 삭제하시겠습니까?\n삭제된 이후에는 복구할 수 없습니다.', 'fa-solid fa-triangle-exclamation')) {
                 showToast('휴지통을 비우는 중입니다...');
                 const res = await apiRequest('empty_trash', 'POST');
                 showToast(res.message);
@@ -1663,44 +1666,31 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTagsPopoverList(tags) {
         const popoverList = document.getElementById('tags-popover-list');
         if (!popoverList) return;
-        
-        popoverList.innerHTML = '';
-        
+
         if (tags.length === 0) {
             popoverList.innerHTML = '<div style="padding: 10px; color: var(--text-secondary); font-size: 12px; text-align: center;">생성된 폴더가 없습니다.</div>';
             return;
         }
-        
-        tags.forEach(tag => {
+
+        popoverList.innerHTML = '';
+        tags.forEach(t => {
+            const tag = t.name;
             const a = document.createElement('a');
             a.href = '#';
             a.className = `tags-popover-item ${tag === state.currentFolder ? 'active' : ''}`;
             a.dataset.folder = tag;
             const folderColor = getFolderColor(tag);
-            a.innerHTML = `
-                <i class="fa-solid fa-folder" style="color: ${folderColor};"></i>
-                <span>${escapeHtml(tag)}</span>
-            `;
+            a.innerHTML = `<i class="fa-solid fa-folder" style="color: ${folderColor};"></i><span>${escapeHtml(tag)}</span>`;
             
             a.addEventListener('click', (evt) => {
                 evt.preventDefault();
                 evt.stopPropagation();
-                
                 setCookie('currentFolder', tag);
                 loadEmails(tag);
-                
-                if (sidebarTagsContainer) sidebarTagsContainer.classList.remove('hidden');
-                if (tagsMenuArrow) tagsMenuArrow.classList.add('rotated');
-                
-                const tagsPopover = document.getElementById('tags-popover');
-                if (tagsPopover) tagsPopover.classList.add('hidden');
-                
-                loadTags();
+                document.getElementById('tags-popover').classList.add('hidden');
             });
             popoverList.appendChild(a);
         });
-        
-        syncActiveFolderUI();
     }
 
     async function loadTagsPopoverList() {
@@ -1731,13 +1721,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const tagsPopover = document.getElementById('tags-popover');
             
-            // If popover is open in collapsed mode, close it instantly
             if (sidebar.classList.contains('collapsed') && tagsPopover && !tagsPopover.classList.contains('hidden')) {
                 tagsPopover.classList.add('hidden');
                 return;
             }
             
-            // If sidebarTagsContainer is open in expanded mode, close it instantly
             if (!sidebar.classList.contains('collapsed') && !sidebarTagsContainer.classList.contains('hidden')) {
                 sidebarTagsContainer.classList.add('hidden');
                 if (tagsMenuArrow) tagsMenuArrow.classList.remove('rotated');
@@ -1749,60 +1737,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tags = res.success ? (res.tags || []) : [];
                 
                 if (tags.length === 0) {
-                    // 화살표가 내려갔다가 다시 올라오는 애니메이션
                     if (tagsMenuArrow) {
                         tagsMenuArrow.classList.add('rotated');
                         setTimeout(() => {
                             tagsMenuArrow.classList.remove('rotated');
                         }, 300);
                     }
-
-                    // 빨간색 툴팁 표시 (개인 보관함 아래)
                     showPersonalFolderTooltip();
-
                     if (tagsPopover) tagsPopover.classList.add('hidden');
                     sidebarTagsContainer.classList.add('hidden');
-                    
-                    // Clear contents
-                    sidebarTagsContainer.innerHTML = '';
-                    const popoverList = document.getElementById('tags-popover-list');
-                    if (popoverList) popoverList.innerHTML = '';
                     return;
                 }
                 
                 if (sidebar.classList.contains('collapsed')) {
                     if (tagsPopover) {
-                        // Render tags popover list INSTANTLY before opening to avoid "Loading..." flash
                         renderTagsPopoverList(tags);
                         tagsPopover.classList.remove('hidden');
                     }
                 } else {
                     if (tagsPopover) tagsPopover.classList.add('hidden');
-                    
-                    // Render expanded sidebar tags list INSTANTLY before opening
                     sidebarTagsContainer.innerHTML = '';
-                    tags.forEach(tag => {
+                    tags.forEach(t => {
+                        const tag = t.name;
                         const a = document.createElement('a');
                         a.href = '#';
                         a.className = `tag-item ${tag === state.currentFolder ? 'active' : ''}`;
                         a.dataset.folder = tag;
                         const folderColor = getFolderColor(tag);
-                        a.innerHTML = `
-                            <i class="fa-solid fa-folder" style="color: ${folderColor};"></i>
-                            <span class="nav-label">${escapeHtml(tag)}</span>
-                        `;
+                        a.innerHTML = `<i class="fa-solid fa-folder" style="color: ${folderColor};"></i><span class="nav-label">${escapeHtml(tag)}</span>`;
                         a.addEventListener('click', (e) => {
                             e.preventDefault();
-                            readerEmpty.classList.remove('hidden');
-                            readerContent.classList.add('hidden');
-                            state.selectedEmailId = null;
                             setCookie('currentFolder', tag);
                             loadEmails(tag);
                         });
                         sidebarTagsContainer.appendChild(a);
                     });
-                    syncActiveFolderUI();
-                    
                     sidebarTagsContainer.classList.remove('hidden');
                     if (tagsMenuArrow) tagsMenuArrow.classList.add('rotated');
                 }
@@ -1825,10 +1794,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Tags Management Modal
     const tagsModal = document.getElementById('tags-modal');
     const btnManageTags = document.getElementById('btn-manage-tags');
-    const btnCloseTags = document.getElementById('btn-close-tags');
+    const tagsModalList = document.getElementById('tags-modal-list');
+    const btnOpenTagCreate = document.getElementById('btn-open-tag-create');
+    const tagCreateModal = document.getElementById('tag-create-modal');
     const formCreateTag = document.getElementById('form-create-tag');
     const newTagNameInput = document.getElementById('new-tag-name');
-    const tagsModalList = document.getElementById('tags-modal-list');
+    const tagColorPopover = document.getElementById('tag-color-popover');
+    const tagColorGrid = document.getElementById('tag-color-grid');
 
     if (btnManageTags && tagsModal) {
         btnManageTags.addEventListener('click', (e) => {
@@ -1839,11 +1811,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (btnCloseTags && tagsModal) {
-        btnCloseTags.addEventListener('click', () => {
-            tagsModal.classList.add('hidden');
+    if (btnOpenTagCreate && tagCreateModal) {
+        btnOpenTagCreate.addEventListener('click', () => {
+            tagCreateModal.classList.remove('hidden');
+            setTimeout(() => newTagNameInput.focus(), 100);
         });
     }
+
+    setupClickOutside(tagCreateModal);
 
     async function loadTagsModalList() {
         if (!tagsModalList) return;
@@ -1859,11 +1834,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            tags.forEach(tag => {
+            tags.forEach(t => {
+                const tag = t.name;
                 const tr = document.createElement('tr');
                 const folderColor = getFolderColor(tag);
                 tr.innerHTML = `
-                    <td><i class="fa-solid fa-folder" style="color: ${folderColor}; margin-right: 8px;"></i> ${escapeHtml(tag)}</td>
+                    <td>
+                        <i class="fa-solid fa-folder tag-folder-icon-clickable" style="color: ${folderColor}; margin-right: 8px;" data-tag="${escapeHtml(tag)}"></i> 
+                        ${escapeHtml(tag)}
+                    </td>
                     <td style="text-align: center;">
                         <button class="btn-tag-delete btn-danger-action" data-tag="${escapeHtml(tag)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>
                     </td>
@@ -1871,7 +1850,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 tr.querySelector('.btn-tag-delete').addEventListener('click', async (evt) => {
                     const tName = evt.currentTarget.dataset.tag;
-                    if (!await customConfirm(`'${tName}' 개인 폴더를 삭제하시겠습니까?\n폴더 내부의 모든 메일도 함께 삭제됩니다.`)) return;
+                    if (!await customConfirm(`'${tName}' 개인 폴더를 삭제하시겠습니까?\n폴더 내부의 모든 메일도 함께 삭제됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
                     
                     showToast('폴더 삭제 중...');
                     const r = await apiRequest('delete_tag', 'POST', { tag_name: tName });
@@ -1885,6 +1864,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                 });
+
+                // Color picker logic
+                tr.querySelector('.tag-folder-icon-clickable').addEventListener('click', (evt) => {
+                    evt.stopPropagation();
+                    const tag = evt.target.dataset.tag;
+                    const rect = evt.target.getBoundingClientRect();
+                    
+                    tagColorPopover.classList.remove('hidden');
+                    tagColorPopover.style.top = `${rect.bottom + 5}px`;
+                    tagColorPopover.style.left = `${rect.left}px`;
+                    
+                    renderColorPicker(tag);
+                });
                 
                 tagsModalList.appendChild(tr);
             });
@@ -1892,6 +1884,36 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(res.message);
         }
     }
+
+    function renderColorPicker(tagName) {
+        const colors = [
+            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
+            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
+        ];
+        
+        tagColorGrid.innerHTML = '';
+        colors.forEach(color => {
+            const item = document.createElement('div');
+            item.className = 'tag-color-item';
+            item.style.backgroundColor = color;
+            item.addEventListener('click', async () => {
+                const res = await apiRequest('set_folder_color', 'POST', { folder_name: tagName, color: color });
+                if (res.success) {
+                    state.tagColors[tagName] = color;
+                    loadTagsModalList();
+                    loadTags();
+                    tagColorPopover.classList.add('hidden');
+                }
+            });
+            tagColorGrid.appendChild(item);
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#tag-color-popover') && !e.target.closest('.tag-folder-icon-clickable')) {
+            tagColorPopover.classList.add('hidden');
+        }
+    });
 
     if (formCreateTag) {
         formCreateTag.addEventListener('submit', async (e) => {
@@ -1909,6 +1931,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(res.message);
             if (res.success) {
                 newTagNameInput.value = '';
+                tagCreateModal.classList.add('hidden');
                 loadTagsModalList();
                 loadTags();
             }
@@ -2150,9 +2173,6 @@ document.addEventListener('DOMContentLoaded', () => {
         listHeight = targetHeight;
         mailListPane.style.height = `${targetHeight}px`;
         setCookie('listHeight', listHeight);
-        if (state.currentFolder) {
-            setCookie('listHeight_' + state.currentFolder, listHeight);
-        }
     });
 
     // Resizing Sidebar
@@ -2246,9 +2266,6 @@ document.addEventListener('DOMContentLoaded', () => {
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
             setCookie('listHeight', listHeight);
-            if (state.currentFolder) {
-                setCookie('listHeight_' + state.currentFolder, listHeight);
-            }
         }
         
         document.addEventListener('mousemove', onMouseMove);
@@ -2399,8 +2416,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!isDefaultGroup) {
                     tr.querySelector('.btn-group-delete').addEventListener('click', async (evt) => {
-                        const gName = evt.currentTarget.dataset.group;
-                        if (!await customConfirm(`'${gName}' 그룹을 삭제하시겠습니까?\n소속 회원은 모두 '일반' 그룹으로 변경됩니다.`)) return;
+                        const gName = evt.target.closest('tr').dataset.group;
+                        if (!await customConfirm(`'${gName}' 그룹을 삭제하시겠습니까?\n소속 회원은 모두 '일반' 그룹으로 변경됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
                         showToast('그룹 삭제 중...');
                         const r = await apiRequest('admin_delete_group', 'POST', { name: gName });
                         showToast(r.message);
@@ -2594,7 +2611,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const noConfirmDelete = (state.currentFolder === 'INBOX' || !['Sent', 'Drafts', 'Trash'].includes(state.currentFolder));
         if (!noConfirmDelete) {
-            if (!await customConfirm(`${targets.length}개의 메일을 삭제하시겠습니까?`)) return;
+            let msg = `${targets.length}개의 메일을 삭제하시겠습니까?`;
+            if (state.currentFolder === 'Trash') {
+                msg = `${targets.length}개의 메일을 영구 삭제하시겠습니까?\n삭제된 이후에는 복구할 수 없습니다.`;
+            }
+            if (!await customConfirm(msg, 'fa-solid fa-triangle-exclamation')) return;
         }
 
         showToast('메일을 삭제 중입니다...');
@@ -2616,15 +2637,37 @@ document.addEventListener('DOMContentLoaded', () => {
     // --------------------------------------------------
     function makeTableColumnsResizable(table) {
         const headers = table.querySelectorAll('thead th');
+        
+        // 1. Ensure all columns have an initial explicit pixel width (except filler)
+        headers.forEach(th => {
+            if (th.classList.contains('col-filler')) return;
+            if (!th.style.width) {
+                th.style.width = th.offsetWidth + 'px';
+            }
+        });
+        
+        // 2. Dynamically update table min-width based on sum of explicit columns
+        const updateTableMinWidth = () => {
+            let total = 0;
+            headers.forEach(h => {
+                if (!h.classList.contains('col-filler')) {
+                    total += parseFloat(h.style.width) || h.offsetWidth;
+                }
+            });
+            // Give 20px padding for safety, let it naturally fill 100% otherwise
+            table.style.minWidth = `max(100%, ${total + 20}px)`;
+            table.style.width = '100%'; 
+        };
+        updateTableMinWidth();
+
         headers.forEach((th) => {
             const colClass = Array.from(th.classList).find(c => c.startsWith('col-'));
-            if (!colClass || colClass === 'col-chk' || colClass === 'col-flag') {
+            if (!colClass || colClass === 'col-chk' || colClass === 'col-flag' || colClass === 'col-filler') {
                 return;
             }
 
             const colName = colClass.replace('col-', '');
             
-            // Insert resizer handle if not already present
             if (!th.querySelector('.col-resizer')) {
                 const resizer = document.createElement('div');
                 resizer.className = 'col-resizer';
@@ -2635,16 +2678,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     e.stopPropagation();
                     
                     const startX = e.clientX;
-                    const startWidth = th.offsetWidth;
+                    const startWidth = parseFloat(th.style.width) || th.offsetWidth;
                     
                     document.body.style.cursor = 'col-resize';
                     resizer.classList.add('dragging');
                     
                     function onMouseMove(event) {
-                        const width = startWidth + (event.clientX - startX);
-                        const minWidth = 60; // minimum column width
+                        const delta = event.clientX - startX;
+                        const width = startWidth + delta;
+                        const minWidth = 60; 
                         if (width >= minWidth) {
                             th.style.width = width + 'px';
+                            updateTableMinWidth();
                         }
                     }
                     
@@ -2654,13 +2699,45 @@ document.addEventListener('DOMContentLoaded', () => {
                         document.removeEventListener('mousemove', onMouseMove);
                         document.removeEventListener('mouseup', onMouseUp);
                         
-                        // Save width to cookie
-                        const finalWidth = th.offsetWidth;
-                        setCookie('colWidth_' + colName, finalWidth);
+                        setCookie('colWidth_' + colName, parseFloat(th.style.width));
                     }
                     
                     document.addEventListener('mousemove', onMouseMove);
                     document.addEventListener('mouseup', onMouseUp);
+                });
+
+                // Double click to auto-fit
+                resizer.addEventListener('dblclick', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const cells = table.querySelectorAll(`tbody td.${colClass}`);
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    let maxWidth = 0;
+                    
+                    // Get font style from header
+                    const thStyle = window.getComputedStyle(th);
+                    context.font = `${thStyle.fontWeight} ${thStyle.fontSize} ${thStyle.fontFamily}`;
+                    maxWidth = Math.max(maxWidth, context.measureText(th.textContent.trim()).width + 40);
+                    
+                    // Measure all visible cells in this column
+                    cells.forEach(td => {
+                        const tdStyle = window.getComputedStyle(td);
+                        context.font = `${tdStyle.fontWeight} ${tdStyle.fontSize} ${tdStyle.fontFamily}`;
+                        // Account for padding and potential icons
+                        let extra = 24;
+                        if (colName === 'subject') extra = 48; // for envelope icons
+                        maxWidth = Math.max(maxWidth, context.measureText(td.textContent.trim()).width + extra);
+                    });
+                    
+                    if (maxWidth < 60) maxWidth = 60;
+                    if (maxWidth > 800) maxWidth = 800; // Limit maximum
+                    
+                    th.style.width = maxWidth + 'px';
+                    updateTableMinWidth();
+                    
+                    setCookie('colWidth_' + colName, maxWidth);
                 });
             }
         });

@@ -59,6 +59,15 @@ $db->exec("CREATE TABLE IF NOT EXISTS groups (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )");
 
+// Create table folder_colors to store custom colors for folders
+$db->exec("CREATE TABLE IF NOT EXISTS folder_colors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    folder_name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    UNIQUE(username, folder_name)
+)");
+
 // Insert default group
 $db->exec("INSERT OR IGNORE INTO groups (name) VALUES ('일반')");
 
@@ -264,12 +273,13 @@ function parse_email_header_from_content(string $content, string $filename, stri
     $parts = explode("\n\n", str_replace("\r", "", $content), 2);
     $header_raw = $parts[0] ?? '';
     $body_raw = $parts[1] ?? '';
-    
+
     $headers = parse_headers($header_raw);
-    
+
     $subject = isset($headers['subject']) ? mb_decode_mimeheader($headers['subject']) : '(제목 없음)';
     $from = isset($headers['from']) ? mb_decode_mimeheader($headers['from']) : '';
     $to = isset($headers['to']) ? mb_decode_mimeheader($headers['to']) : '';
+    $cc = isset($headers['cc']) ? mb_decode_mimeheader($headers['cc']) : '';
     $date = isset($headers['date']) ? $headers['date'] : '';
     
     $seen = false;
@@ -314,6 +324,7 @@ function parse_email_header_from_content(string $content, string $filename, stri
         'subject' => $subject,
         'from' => $from,
         'to' => $to,
+        'cc' => $cc,
         'date' => $date,
         'timestamp' => $timestamp,
         'seen' => $seen,
@@ -333,6 +344,7 @@ function parse_email_from_content(string $content, string $filename, string $fol
     $subject = isset($headers['subject']) ? mb_decode_mimeheader($headers['subject']) : '(제목 없음)';
     $from = isset($headers['from']) ? mb_decode_mimeheader($headers['from']) : '';
     $to = isset($headers['to']) ? mb_decode_mimeheader($headers['to']) : '';
+    $cc = isset($headers['cc']) ? mb_decode_mimeheader($headers['cc']) : '';
     $date = isset($headers['date']) ? $headers['date'] : '';
     
     $seen = false;
@@ -373,6 +385,7 @@ function parse_email_from_content(string $content, string $filename, string $fol
         'subject' => $subject,
         'from' => $from,
         'to' => $to,
+        'cc' => $cc,
         'date' => $date,
         'timestamp' => $timestamp,
         'seen' => $seen,
@@ -1166,6 +1179,12 @@ switch ($action) {
         $cmd = "sudo /usr/local/bin/manage_mail_files.sh list_tags " . escapeshellarg($username);
         exec($cmd, $output, $return_var);
         $tags = [];
+        
+        // Fetch saved colors from database
+        $stmt = $db->prepare("SELECT folder_name, color FROM folder_colors WHERE username = :username");
+        $stmt->execute([':username' => $username]);
+        $colors = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        
         if ($return_var === 0) {
             foreach ($output as $line) {
                 $line = trim($line);
@@ -1173,12 +1192,36 @@ switch ($action) {
                 if ($line[0] === '.') {
                     $tag_name = substr($line, 1);
                     if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts'], true)) {
-                        $tags[] = $tag_name;
+                        $tags[] = [
+                            'name' => $tag_name,
+                            'color' => $colors[$tag_name] ?? null
+                        ];
                     }
                 }
             }
         }
         respond(true, '성공', ['tags' => $tags]);
+        break;
+
+    case 'set_folder_color':
+        check_auth();
+        $username = $_SESSION['username'];
+        $folder_name = trim($_POST['folder_name'] ?? '');
+        $color = trim($_POST['color'] ?? '');
+        
+        if (empty($folder_name) || empty($color)) {
+            respond(false, '필수 항목이 누락되었습니다.');
+        }
+        
+        $stmt = $db->prepare("INSERT INTO folder_colors (username, folder_name, color) VALUES (:username, :folder_name, :color) 
+                             ON CONFLICT(username, folder_name) DO UPDATE SET color = EXCLUDED.color");
+        $stmt->execute([
+            ':username' => $username,
+            ':folder_name' => $folder_name,
+            ':color' => $color
+        ]);
+        
+        respond(true, '폴더 색상이 저장되었습니다.');
         break;
 
     case 'create_tag':

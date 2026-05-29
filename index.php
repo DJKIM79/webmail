@@ -117,7 +117,7 @@
                     <div class="pane-header-right">
                         <div class="search-box">
                             <i class="fa-solid fa-magnifying-glass"></i>
-                            <input type="text" id="mail-search" placeholder="제목 또는 보낸사람 검색...">
+                            <input type="text" id="mail-search" placeholder="제목 또는 사람 검색...">
                         </div>
                     </div>
                 </div>
@@ -270,7 +270,7 @@
     <div id="compose-modal" class="compose-overlay hidden">
         <div class="compose-card">
             <div class="compose-header">
-                <h3>새 메일 작성</h3>
+                <h3><i class="fa-solid fa-pen-to-square" style="margin-right: 8px; opacity: 0.8;"></i>새 메일 작성</h3>
                 <button id="btn-close-compose" class="btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <form id="form-compose" class="compose-form">
@@ -307,10 +307,7 @@
         <div class="admin-card">
             <div class="admin-header">
                 <h3><i class="fa-solid fa-user-gear"></i> 회원 관리</h3>
-                <button id="btn-close-admin" class="btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="admin-body">
-                <div class="admin-body-header">
+                <div class="admin-header-actions">
                     <button id="btn-open-admin-create" class="btn-admin-add-user-icon" title="신규 회원 추가">
                         <i class="fa-solid fa-user-plus"></i>
                     </button>
@@ -318,6 +315,8 @@
                         <i class="fa-solid fa-users-gear"></i>
                     </button>
                 </div>
+            </div>
+            <div class="admin-body">
                 <div class="table-responsive">
                     <table class="admin-table">
                         <thead>
@@ -350,7 +349,6 @@
         <div class="admin-create-card">
             <div class="admin-create-header">
                 <h3><i class="fa-solid fa-user-plus"></i> 신규 회원 추가</h3>
-                <button id="btn-close-admin-create" class="btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <form id="form-admin-create-user" class="admin-create-form-modal">
                 <div class="form-group">
@@ -390,15 +388,13 @@
         <div class="tags-card">
             <div class="tags-header">
                 <h3><i class="fa-solid fa-folder-open"></i> 개인 폴더 관리</h3>
-                <button id="btn-close-tags" class="btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
+                <div class="tags-header-actions">
+                    <button id="btn-open-tag-create" class="btn-tag-add-icon" title="새 폴더 추가">
+                        <i class="fa-solid fa-folder-plus"></i>
+                    </button>
+                </div>
             </div>
             <div class="tags-body">
-                <form id="form-create-tag" class="tags-create-form">
-                    <div class="form-group-row">
-                        <input type="text" id="new-tag-name" placeholder="새 폴더 이름 입력 (영문, 숫자, _, -)" required>
-                        <button type="submit" class="btn-add-tag-submit"><i class="fa-solid fa-plus"></i> 추가</button>
-                    </div>
-                </form>
                 <div class="tags-list-container">
                     <table class="tags-table">
                         <thead>
@@ -416,12 +412,35 @@
         </div>
     </div>
 
+    <!-- TAG CREATE MODAL -->
+    <div id="tag-create-modal" class="tag-create-overlay hidden">
+        <div class="tag-create-card">
+            <div class="tag-create-header">
+                <h3><i class="fa-solid fa-folder-plus"></i> 새 폴더 생성</h3>
+            </div>
+            <form id="form-create-tag" class="tag-create-form-modal">
+                <div class="form-group">
+                    <input type="text" id="new-tag-name" placeholder="폴더 이름을 입력하세요." required autocomplete="off">
+                </div>
+                <div class="tag-create-footer">
+                    <button type="submit" class="btn-submit">생성</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TAG COLOR POPOVER -->
+    <div id="tag-color-popover" class="tag-color-popover hidden">
+        <div class="tag-color-grid" id="tag-color-grid">
+            <!-- Dynamic 10 colors -->
+        </div>
+    </div>
+
     <!-- GROUPS MANAGEMENT MODAL -->
     <div id="groups-modal" class="groups-overlay hidden">
         <div class="groups-card">
             <div class="groups-header">
                 <h3><i class="fa-solid fa-users-gear"></i> 그룹 관리</h3>
-                <button id="btn-close-groups-modal" class="btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="groups-body">
                 <form id="form-create-group" class="groups-create-form">
@@ -469,7 +488,6 @@
         <div class="settings-card">
             <div class="settings-header">
                 <h3><i class="fa-solid fa-gear"></i> 개인 설정</h3>
-                <button id="btn-close-settings" class="btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <form id="form-settings" class="settings-form">
                 <!-- 2컬럼 그리드 레이아웃 -->

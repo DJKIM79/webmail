@@ -2703,11 +2703,22 @@ body.theme-white .btn-close-modal:hover {
     margin-bottom: 16px !important;
 }
 
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.admin-header-actions {
+    display: flex;
+    gap: 8px;
+}
+
 .btn-admin-add-user-icon, .btn-admin-groups-icon {
-    width: 36px !important;
-    height: 36px !important;
+    width: 32px !important;
+    height: 32px !important;
     border-radius: var(--radius-sm) !important;
-    font-size: 16px !important;
+    font-size: 14px !important;
     cursor: pointer !important;
     display: flex !important;
     align-items: center !important;
@@ -2715,6 +2726,10 @@ body.theme-white .btn-close-modal:hover {
     border: none !important;
     color: white !important;
     transition: all var(--transition-fast) !important;
+}
+
+.admin-body-header {
+    display: none !important;
 }
 
 .btn-admin-add-user-icon {
@@ -2729,10 +2744,142 @@ body.theme-white .btn-close-modal:hover {
 .btn-admin-groups-icon {
     background: var(--color-primary) !important;
 }
-.btn-admin-groups-icon:hover {
-    background: #7c3aed !important;
-    box-shadow: 0 4px 12px var(--color-primary-glow) !important;
-    transform: translateY(-1px) !important;
+.tags-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tags-header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-tag-add-icon {
+    width: 32px !important;
+    height: 32px !important;
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: all var(--transition-fast);
+}
+
+.btn-tag-add-icon:hover {
+    background: #7c3aed;
+    box-shadow: 0 4px 12px var(--color-primary-glow);
+    transform: translateY(-1px);
+}
+
+/* Tag Create Modal */
+.tag-create-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+}
+
+.tag-create-card {
+    background: var(--bg-surface-solid);
+    width: 320px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    animation: fadeInUp 0.3s ease;
+}
+
+.tag-create-header {
+    padding: 20px 24px 10px;
+}
+
+.tag-create-header h3 {
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tag-create-form-modal {
+    padding: 10px 24px 24px;
+}
+
+.tag-create-form-modal input {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.tag-create-form-modal input:focus {
+    border-color: var(--color-primary);
+}
+
+.tag-create-footer {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Tag Color Popover */
+.tag-color-popover {
+    position: fixed;
+    background: var(--bg-surface-solid);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    padding: 12px;
+    z-index: 4000;
+    width: 140px;
+}
+
+.tag-color-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+}
+
+.tag-color-item {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.1s;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.tag-color-item:hover {
+    transform: scale(1.2);
+}
+
+.tag-folder-icon-clickable {
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.tag-folder-icon-clickable:hover {
+    background: rgba(255,255,255,0.05);
 }
 
 /* 요구사항 4.2: 회원 목록 그룹 열 중간 정렬 및 필터 스타일 */
@@ -2968,6 +3115,10 @@ body.theme-white .btn-close-modal:hover {
     color: var(--color-primary);
     margin-top: 2px;
     flex-shrink: 0;
+}
+
+.confirm-icon.fa-triangle-exclamation {
+    color: var(--color-danger);
 }
 
 .confirm-message {
@@ -3382,24 +3533,42 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .mail-list-table {
-    width: 100% !important;
-    border-collapse: collapse !important;
-    table-layout: fixed !important;
-    font-size: 13px !important;
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
 }
 
 .mail-list-table thead th {
-    position: sticky !important;
-    top: 0 !important;
-    z-index: 10 !important;
-    background: var(--bg-pane-header, var(--bg-list-pane)) !important;
-    border-bottom: 2px solid var(--border-color) !important;
-    padding: 12px 8px !important;
-    font-weight: 600 !important;
-    color: var(--text-secondary) !important;
-    text-align: left !important;
-    font-size: 12px !important;
-    box-shadow: 0 1px 0 var(--border-color) !important;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg-pane-header, var(--bg-list-pane));
+    border-bottom: 2px solid var(--border-color);
+    padding: 12px 8px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: left;
+    font-size: 12px;
+    box-shadow: 0 1px 0 var(--border-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 11;
+}
+
+.col-resizer:hover, .col-resizer.dragging {
+    background: var(--color-primary);
+    opacity: 0.5;
 }
 
 .mail-list-table thead th.col-chk,
@@ -3407,7 +3576,15 @@ body.theme-white .btn-close-modal:hover {
     text-align: center !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
-    width: 24px !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+}
+
+.mail-list-table thead th.col-filler,
+.mail-list-table tbody td.col-filler {
+    padding: 0 !important;
+    border: none !important;
 }
 
 .mail-list-table thead th.col-date {
