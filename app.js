@@ -118,6 +118,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsModal = document.getElementById('settings-modal');
     const btnCloseSettings = document.getElementById('btn-close-settings');
     const formSettings = document.getElementById('form-settings');
+
+    // --- 모달 바깥 영역 클릭 시 닫기 기능 추가 ---
+    function setupClickOutside(modalEl) {
+        if (!modalEl) return;
+        modalEl.addEventListener('click', (e) => {
+            // 클릭된 대상이 모달 배경(카드 외부)인 경우에만 닫음
+            if (e.target === modalEl) {
+                // 인증 모달은 로그인 상태가 아닐 때는 닫히지 않도록 예외 처리
+                if (modalEl === authModal && !state.user) {
+                    return;
+                }
+                modalEl.classList.add('hidden');
+            }
+        });
+    }
+
+    // 대상 모달들에 기능 적용
+    setupClickOutside(authModal);
+    setupClickOutside(composeModal);
+    setupClickOutside(adminModal);
+    setupClickOutside(settingsModal);
+    setupClickOutside(document.getElementById('tags-modal'));
+    setupClickOutside(document.getElementById('groups-modal'));
+    setupClickOutside(document.getElementById('admin-create-user-modal'));
+    setupClickOutside(document.getElementById('locked-modal'));
+
     
     function syncActiveFolderUI() {
         const folder = state.currentFolder;
@@ -554,7 +580,8 @@ document.addEventListener('DOMContentLoaded', () => {
     btnLogout.addEventListener('click', async () => {
         const res = await apiRequest('logout');
         if (res.success) {
-            logoutUser();
+            // 로그아웃 시 페이지를 완전히 새로고침하여 잔여 세션 및 상태를 완벽히 제거
+            location.reload();
         }
     });
 

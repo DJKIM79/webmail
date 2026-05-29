@@ -600,6 +600,15 @@
         var profilePicInput = document.getElementById('profile-pic-input');
         var btnTriggerUpload = document.getElementById('btn-trigger-upload');
 
+        // 바깥 영역 클릭 시 닫기
+        if (cropModal) {
+            cropModal.addEventListener('click', function(e) {
+                if (e.target === cropModal) {
+                    closeCropModal();
+                }
+            });
+        }
+
         function closeCropModal() {
             if (cropModal) cropModal.classList.add('hidden');
             if (cropper) {
