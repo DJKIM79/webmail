@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <!-- Gradient for the main envelope body -->
+    <linearGradient id="envelopeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <!-- Gradient for the top flap to create depth -->
+    <linearGradient id="flapGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <!-- Shadow filter for 3D depth -->
+    <filter id="dropShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+  
+  <!-- Subtle dark glow background -->
+  <rect x="2" y="5" width="28" height="20" rx="3" fill="#11111a" opacity="0.3" />
+  
+  <!-- Main Envelope Body -->
+  <rect x="2" y="5" width="28" height="20" rx="3" fill="url(#envelopeGrad)" />
+  
+  <!-- Bottom & Side Fold Lines (drawn as a path with lighter overlay) -->
+  <path d="M 2,25 L 12,16 M 30,25 L 20,16" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" opacity="0.35" />
+  <path d="M 2,25 H 30" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" opacity="0.25" />
+
+  <!-- Top Flap (folds down) -->
+  <path d="M 2,5 L 16,16 L 30,5 Z" fill="url(#flapGrad)" filter="url(#dropShadow)" />
+  
+  <!-- Flap highlight border -->
+  <path d="M 2,5 L 16,16 L 30,5" fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" opacity="0.5" />
+</svg>
