@@ -26,7 +26,8 @@ $db->exec("CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     role TEXT NOT NULL DEFAULT 'user',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status_updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )");
 
 // Pre-seed admin user dj / kdjkss
@@ -34,13 +35,20 @@ $stmt = $db->prepare("SELECT COUNT(*) FROM users WHERE username = 'dj'");
 $stmt->execute();
 if ($stmt->fetchColumn() == 0) {
     $hash = password_hash('kdjkss', PASSWORD_BCRYPT);
-    $stmt = $db->prepare("INSERT INTO users (username, name, password_hash, status, role, group_name) VALUES ('dj', '관리자', :hash, 'approved', 'admin', '일반')");
+    $stmt = $db->prepare("INSERT INTO users (username, name, password_hash, status, role, group_name) VALUES ('dj', '관리자', :hash, 'approved', 'admin', '기본')");
     $stmt->execute([':hash' => $hash]);
 }
 
 // Alter table to add group_name column if not exists
 try {
-    $db->exec("ALTER TABLE users ADD COLUMN group_name TEXT DEFAULT '일반'");
+    $db->exec("ALTER TABLE users ADD COLUMN group_name TEXT DEFAULT '기본'");
+} catch (PDOException $e) {
+    // Ignore error if column already exists
+}
+
+// Alter table to add last_login column if not exists
+try {
+    $db->exec("ALTER TABLE users ADD COLUMN last_login DATETIME");
 } catch (PDOException $e) {
     // Ignore error if column already exists
 }
@@ -69,7 +77,7 @@ $db->exec("CREATE TABLE IF NOT EXISTS folder_colors (
 )");
 
 // Insert default group
-$db->exec("INSERT OR IGNORE INTO groups (name) VALUES ('일반')");
+$db->exec("INSERT OR IGNORE INTO groups (name) VALUES ('기본')");
 
 
 // --- HELPER FUNCTIONS ---
@@ -470,7 +478,9 @@ switch ($action) {
         }
         
         if ($user['status'] === 'pending') {
-            respond(false, '관리자의 가입 승인을 대기 중입니다.');
+            respond(false, '이미 승인 요청 중입니다.');
+        } elseif ($user['status'] === 'rejected') {
+            respond(false, '승인이 거절된 상태입니다. 관리자에게 문의하여 주십시오.');
         } elseif ($user['status'] === 'locked') {
             respond(false, 'locked');
         }
@@ -478,7 +488,15 @@ switch ($action) {
         $_SESSION['username'] = $user['username'];
         $_SESSION['name'] = $user['name'];
         $_SESSION['role'] = $user['role'];
-        
+
+        // Update last login
+        try {
+            $stmtUpdate = $db->prepare("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = :id");
+            $stmtUpdate->execute([':id' => $user['id']]);
+        } catch (PDOException $e) {
+            // Ignore error
+        }
+
         if ($keep) {
             $params = session_get_cookie_params();
             setcookie(
@@ -848,14 +866,14 @@ switch ($action) {
     
     case 'admin_list_users':
         check_admin();
-        $stmt = $db->query("SELECT id, username, name, status, role, group_name, created_at FROM users ORDER BY created_at DESC");
+        $stmt = $db->query("SELECT id, username, name, status, role, group_name, last_login FROM users ORDER BY id ASC");
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         respond(true, '성공', ['users' => $users]);
         break;
 
     case 'admin_list_groups':
         check_admin();
-        $stmt = $db->query("SELECT * FROM groups ORDER BY name ASC");
+        $stmt = $db->query("SELECT * FROM groups ORDER BY CASE WHEN name = '기본' THEN 0 ELSE 1 END, name ASC");
         $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
         respond(true, '성공', ['groups' => $groups]);
         break;
@@ -882,7 +900,7 @@ switch ($action) {
     case 'admin_delete_group':
         check_admin();
         $name = trim($_POST['name'] ?? '');
-        if ($name === '일반') {
+        if ($name === '기본') {
             respond(false, '기본 그룹은 삭제할 수 없습니다.');
         }
         
@@ -894,7 +912,7 @@ switch ($action) {
             if (($key = array_search($name, $groups)) !== false) {
                 unset($groups[$key]);
                 if (empty($groups)) {
-                    $groups[] = '일반';
+                    $groups[] = '기본';
                 }
                 $new_group_name = implode(', ', $groups);
                 $stmt2 = $db->prepare("UPDATE users SET group_name = :group_name WHERE id = :id");
@@ -992,62 +1010,88 @@ switch ($action) {
         if (empty($username)) {
             respond(false, '아이디가 누락되었습니다.');
         }
-        
+
         $stmt = $db->prepare("SELECT * FROM users WHERE username = :username");
         $stmt->execute([':username' => $username]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$user) {
             respond(false, '존재하지 않는 사용자입니다.');
         }
-        
+
         if ($user['status'] !== 'locked') {
             respond(false, '잠금 상태인 계정만 해제 요청이 가능합니다.');
         }
-        
+
+        // Update status to pending so admin sees it as an approval request
+        $stmt = $db->prepare("UPDATE users SET status = 'pending', status_updated_at = CURRENT_TIMESTAMP WHERE username = :username");
+        $stmt->execute([':username' => $username]);
+
         // Mail notification to admin
         $admin_email = 'dj@onto.kr';
         $subject = "🔓 계정 잠금 해제 요청: $username";
         $email_body = "다음 사용자가 계정 잠금 해제를 요청했습니다.\n\n" .
                       "아이디: {$username}@onto.kr\n" .
                       "이름: {$user['name']}\n\n" .
-                      "메일 클라이언트 관리자 모드에서 잠금을 해제할 수 있습니다.\n" .
+                      "메일 클라이언트 관리자 모드에서 승인하여 잠금을 해제할 수 있습니다.\n" .
                       "https://mail.onto.kr/\n";
-        
+
         $headers = "From: webmaster@onto.kr\r\nReply-To: webmaster@onto.kr\r\nContent-Type: text/plain; charset=UTF-8\r\n";
         mail($admin_email, "=?UTF-8?B?" . base64_encode($subject) . "?=", $email_body, $headers, "-f webmaster@onto.kr");
-        
-        respond(true, '잠금 해제 요청 메일이 관리자에게 전송되었습니다.');
+
+        respond(true, '잠금 해제 요청이 접수되어 관리자에게 전송되었습니다.');
         break;
 
     case 'admin_approve':
         check_admin();
         $id = (int)($_POST['id'] ?? 0);
-        
+
         $stmt = $db->prepare("SELECT * FROM users WHERE id = :id");
         $stmt->execute([':id' => $id]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$user) {
             respond(false, '사용자를 찾을 수 없습니다.');
         }
-        
+
         if ($user['status'] === 'approved') {
             respond(false, '이미 승인된 사용자입니다.');
         }
-        
+
         $email = $user['username'] . '@onto.kr';
         $cmd = "sudo /usr/local/bin/manage_mail_user.sh add " . escapeshellarg($email) . " " . escapeshellarg($user['password_hash']);
-        
+
         exec($cmd, $output, $return_val);
         if ($return_val !== 0) {
             respond(false, '메일 시스템 설정 실패: ' . implode("\n", $output));
         }
-        
-        $stmt = $db->prepare("UPDATE users SET status = 'approved' WHERE id = :id");
+
+        $stmt = $db->prepare("UPDATE users SET status = 'approved', status_updated_at = CURRENT_TIMESTAMP WHERE id = :id");
         $stmt->execute([':id' => $id]);
-        
+
         respond(true, '사용자가 승인되었습니다. 메일 계정이 활성화되었습니다.');
+        break;
+
+    case 'admin_reject':
+        check_admin();
+        $id = (int)($_POST['id'] ?? 0);
+
+        $stmt = $db->prepare("SELECT * FROM users WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            respond(false, '사용자를 찾을 수 없습니다.');
+        }
+
+        if ($user['username'] === 'dj') {
+            respond(false, '관리자 계정은 거절할 수 없습니다.');
+        }
+
+        $stmt = $db->prepare("UPDATE users SET status = 'rejected', status_updated_at = CURRENT_TIMESTAMP WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+
+        respond(true, '사용자 승인이 거부되었습니다.');
         break;
 
     case 'admin_lock':
@@ -1140,7 +1184,7 @@ switch ($action) {
         $username = trim($_POST['username'] ?? '');
         $name = trim($_POST['name'] ?? '');
         $password = $_POST['password'] ?? '';
-        $group_names_str = trim($_POST['group_name'] ?? '일반');
+        $group_names_str = trim($_POST['group_name'] ?? '기본');
         
         if (empty($username) || empty($name) || empty($password)) {
             respond(false, '모든 필수 항목을 입력해주세요.');
@@ -1159,7 +1203,7 @@ switch ($action) {
         // Validate group names
         $groups_array = array_filter(array_map('trim', explode(',', $group_names_str)));
         if (empty($groups_array)) {
-            $groups_array = ['일반'];
+            $groups_array = ['기본'];
         }
         foreach ($groups_array as $gname) {
             $stmt = $db->prepare("SELECT COUNT(*) FROM groups WHERE name = :name");

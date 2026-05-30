@@ -978,8 +978,17 @@ body {
 }
 
 /* Admin Card spec */
+.multi-group-dropdown.full-width {
+    width: 100%;
+}
+
+.multi-group-dropdown.full-width .btn-multi-group-trigger {
+    width: 100%;
+    justify-content: space-between;
+}
+
 .admin-card {
-    width: 800px;
+    width: 900px;
     max-height: 600px;
 }
 
@@ -1000,14 +1009,43 @@ body {
 }
 
 .admin-table th, .admin-table td {
-    padding: 12px 16px;
+    padding: 12px 12px;
     text-align: left;
+    white-space: nowrap;
 }
 
 .admin-table th {
     border-bottom: 2px solid var(--border-color);
     color: var(--text-secondary);
     font-weight: 600;
+}
+
+.admin-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: color var(--transition-fast);
+}
+
+.admin-table th.sortable:hover {
+    color: var(--text-primary);
+}
+
+.admin-table th.sortable i {
+    margin-left: 4px;
+    opacity: 0.3;
+}
+
+.admin-table th.sortable.active {
+    color: var(--color-primary);
+}
+
+.admin-table th.sortable.active i {
+    opacity: 1;
+}
+
+.admin-table th.col-status, .admin-table td.col-status,
+.admin-table th.col-group, .admin-table td.col-group {
+    text-align: center;
 }
 
 .admin-table td {
@@ -1021,17 +1059,19 @@ body {
 
 /* User Status Badges */
 .status-badge {
-    padding: 2px 8px;
+    padding: 2px 0;
     border-radius: 4px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     display: inline-block;
+    width: 60px;
+    text-align: center;
 }
 
 .status-badge.pending {
-    background: rgba(245, 158, 11, 0.15);
-    color: var(--color-warning);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(14, 165, 233, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(14, 165, 233, 0.3);
 }
 
 .status-badge.approved {
@@ -1046,20 +1086,32 @@ body {
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.status-badge.rejected {
+    background: rgba(100, 116, 139, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
 .admin-actions-cell {
     display: flex;
-    gap: 6px;
+    gap: 9px;
+    white-space: nowrap;
 }
 
 .btn-admin-action {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
-    padding: 4px 8px;
+    padding: 4px 0;
+    width: 44px;
+    justify-content: center;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
     transition: all var(--transition-fast);
 }
 
@@ -1436,7 +1488,7 @@ body {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
-    width: 400px;
+    width: 320px;
     padding: 24px;
     display: flex;
     flex-direction: column;
@@ -2190,7 +2242,7 @@ body.theme-white .btn-close-modal:hover {
 .multi-group-dropdown {
     position: relative;
     display: inline-block;
-    width: 140px;
+    width: 100%;
     margin: 0 auto;
     text-align: left;
 }
@@ -2200,8 +2252,8 @@ body.theme-white .btn-close-modal:hover {
     border: 1px solid var(--border-color);
     color: var(--text-primary);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
-    font-size: 12px;
+    padding: 6px 4px;
+    font-size: 11px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -2218,6 +2270,9 @@ body.theme-white .btn-close-modal:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     margin-right: 4px;
+    margin-left: 8px;
+    flex: 1;
+    text-align: left;
 }
 .multi-group-options {
     position: fixed !important;
@@ -2233,6 +2288,10 @@ body.theme-white .btn-close-modal:hover {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+#header-status-filter-options {
+    max-height: none;
 }
 .multi-group-options.hidden {
     display: none !important;
@@ -2340,7 +2399,7 @@ body.theme-white .btn-close-modal:hover {
 
 /* Groups Modal Specific Styles */
 .groups-card {
-    width: 580px;
+    width: 420px;
     max-height: 500px;
 }
 
@@ -3101,7 +3160,8 @@ body.theme-white .btn-close-modal:hover {
                 opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 margin 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 padding 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                visibility 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                visibility 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     max-width: 250px;
     opacity: 1;
     overflow: hidden;
@@ -3146,6 +3206,16 @@ body.theme-white .btn-close-modal:hover {
     background: var(--color-danger);
     color: white;
     box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+
+.btn-empty-trash:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    border-color: rgba(255, 255, 255, 0.15);
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.03);
+    filter: none;
+    pointer-events: none;
 }
 
 /* --------------------------------------------------
@@ -3854,14 +3924,14 @@ body.theme-white .btn-close-modal:hover {
 @keyframes refresh-rotate {
     0% {
         transform: rotate(0deg);
-        color: var(--text-secondary);
+        color: inherit;
     }
     50% {
-        color: var(--color-success, #2ecc71);
+        color: var(--color-success);
     }
     100% {
         transform: rotate(180deg);
-        color: var(--text-secondary);
+        color: inherit;
     }
 }
 
@@ -3872,7 +3942,7 @@ body.theme-white .btn-close-modal:hover {
 
 .btn-refresh.refreshing i {
     display: inline-block !important;
-    animation: refresh-rotate 1s ease-in-out forwards !important;
+    animation: refresh-rotate 0.8s ease-in-out infinite !important;
 }
 
 @keyframes content-flash {

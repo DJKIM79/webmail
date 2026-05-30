@@ -110,7 +110,7 @@
                         <button id="btn-refresh" class="btn-refresh" title="새로고침">
                             <i class="fa-solid fa-rotate"></i>
                         </button>
-                        <button type="button" id="btn-empty-trash" class="btn-empty-trash hidden" title="휴지통 비우기">
+                        <button type="button" id="btn-empty-trash" class="btn-empty-trash hidden" title="휴지통 비우기" disabled>
                             <i class="fa-solid fa-trash-arrow-up"></i> <span>휴지통 비우기</span>
                         </button>
                     </div>
@@ -320,13 +320,13 @@
                     <table class="admin-table">
                         <thead>
                             <tr>
-                                <th>아이디</th>
-                                <th>이름</th>
-                                <th>
+                                <th class="sortable" data-sort="username" style="width: 100px;">아이디 <i class="fa-solid fa-sort"></i></th>
+                                <th class="sortable" data-sort="name" style="width: 100px;">이름 <i class="fa-solid fa-sort"></i></th>
+                                <th class="col-group" style="width: 140px;">
                                     <div class="header-filter-wrapper">
                                         <div id="header-group-filter-dropdown" class="multi-group-dropdown header-filter-dropdown">
                                             <button class="btn-multi-group-trigger" type="button" id="btn-header-filter-trigger">
-                                                <span>전체</span> <i class="fa-solid fa-caret-down"></i>
+                                                <span>그룹</span> <i class="fa-solid fa-caret-down"></i>
                                             </button>
                                             <div id="header-group-filter-options" class="multi-group-options hidden">
                                                 <!-- Dynamic -->
@@ -334,10 +334,40 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th>신청일</th>
-                                <th>상태</th>
-                                <th></th>
-                                </tr>
+                                <th class="sortable" data-sort="last_login" style="width: 160px;">마지막 로그인 <i class="fa-solid fa-sort"></i></th>
+                                <th class="col-status" style="width: 130px;">
+                                    <div class="header-filter-wrapper">
+                                        <div id="header-status-filter-dropdown" class="multi-group-dropdown header-filter-dropdown">
+                                            <button class="btn-multi-group-trigger" type="button" id="btn-header-status-filter-trigger">
+                                                <span>상태</span> <i class="fa-solid fa-caret-down"></i>
+                                            </button>
+                                            <div id="header-status-filter-options" class="multi-group-options hidden">
+                                                <label class="multi-group-option-label filter-all-label">
+                                                    <input type="checkbox" id="chk-filter-status-all" value="all" checked>
+                                                    <span>전체</span>
+                                                </label>
+                                                <label class="multi-group-option-label">
+                                                    <input type="checkbox" class="chk-filter-status-item" value="approved" checked>
+                                                    <span>활성화</span>
+                                                </label>
+                                                <label class="multi-group-option-label">
+                                                    <input type="checkbox" class="chk-filter-status-item" value="locked" checked>
+                                                    <span>잠금 중</span>
+                                                </label>
+                                                <label class="multi-group-option-label">
+                                                    <input type="checkbox" class="chk-filter-status-item" value="pending" checked>
+                                                    <span>승인 요청</span>
+                                                </label>
+                                                <label class="multi-group-option-label">
+                                                    <input type="checkbox" class="chk-filter-status-item" value="rejected" checked>
+                                                    <span>승인 거부</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th style="width: 110px;"></th>
+                            </tr>
                         </thead>
                         <tbody id="admin-user-list">
                             <!-- Dynamic rendering -->
@@ -378,8 +408,13 @@
                 </div>
                 <div class="form-group">
                     <label>그룹 지정 (1개 이상 선택)</label>
-                    <div id="adm-group-checklist" class="group-checklist-container">
-                        <!-- Dynamic group list checkboxes -->
+                    <div id="adm-group-dropdown" class="multi-group-dropdown full-width">
+                        <button class="btn-multi-group-trigger" type="button" id="btn-adm-group-trigger">
+                            <span>그룹을 선택하세요</span> <i class="fa-solid fa-caret-down"></i>
+                        </button>
+                        <div id="adm-group-options" class="multi-group-options hidden">
+                            <!-- Dynamic group list checkboxes -->
+                        </div>
                     </div>
                 </div>
                 <button type="submit" class="btn-submit">회원 추가</button>
@@ -458,7 +493,7 @@
                         <thead>
                             <tr>
                                 <th>그룹 이름</th>
-                                <th style="width: 220px; text-align: center;">작업</th>
+                                <th style="width: 190px; text-align: left;">작업</th>
                             </tr>
                         </thead>
                         <tbody id="groups-modal-list">
