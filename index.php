@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OnTo mail</title>
+    <title>OnTo Webmail</title>
     <meta name="description" content="OnTo.kr 메일 서비스 - 안전하고 빠른 웹 메일 클라이언트">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,7 +23,7 @@
             <div class="sidebar-header">
                 <div class="logo">
                     <img src="onto.png" alt="OnTo" class="logo-image">
-                    <span class="logo-text">OnTo Webmail</span>
+                    <span class="logo-text">OnTo</span>
                 </div>
             </div>
 
@@ -59,7 +59,6 @@
                     <div class="nav-item" id="btn-toggle-tags">
                         <i class="fa-solid fa-box-archive"></i>
                         <span class="nav-label">개인 보관함</span>
-                        <button id="btn-manage-tags" class="btn-manage-tags-inline" title="보관함 관리"><i class="fa-solid fa-gear"></i></button>
                         <i class="fa-solid fa-caret-down arrow-icon" id="tags-menu-arrow"></i>
                     </div>
                     
@@ -71,8 +70,10 @@
                         </div>
                     </div>
                     
-                    <div id="sidebar-tags-container" class="sidebar-tags hidden">
-                        <!-- Dynamic tags list -->
+                    <div id="sidebar-tags-wrapper" class="sidebar-tags-wrapper">
+                        <div id="sidebar-tags-container" class="sidebar-tags">
+                            <!-- Dynamic tags list -->
+                        </div>
                     </div>
                 </div>
             </nav>
@@ -89,9 +90,6 @@
                     <div class="user-actions">
                         <button id="btn-admin" class="btn-icon-footer hidden" title="관리자 메뉴">
                             <i class="fa-solid fa-user-gear"></i>
-                        </button>
-                        <button id="btn-logout" class="btn-icon-footer" title="로그아웃">
-                            <i class="fa-solid fa-right-from-bracket"></i>
                         </button>
                     </div>
                 </div>
@@ -320,9 +318,9 @@
                     <table class="admin-table">
                         <thead>
                             <tr>
-                                <th class="sortable" data-sort="username" style="width: 100px;">아이디 <i class="fa-solid fa-sort"></i></th>
-                                <th class="sortable" data-sort="name" style="width: 100px;">이름 <i class="fa-solid fa-sort"></i></th>
-                                <th class="col-group" style="width: 140px;">
+                                <th class="sortable" data-sort="username" style="width: 90px;">아이디 <i class="fa-solid fa-sort"></i></th>
+                                <th class="sortable" data-sort="name" style="width: 90px;">이름 <i class="fa-solid fa-sort"></i></th>
+                                <th class="col-group" style="width: 110px;">
                                     <div class="header-filter-wrapper">
                                         <div id="header-group-filter-dropdown" class="multi-group-dropdown header-filter-dropdown">
                                             <button class="btn-multi-group-trigger" type="button" id="btn-header-filter-trigger">
@@ -334,8 +332,8 @@
                                         </div>
                                     </div>
                                 </th>
-                                <th class="sortable" data-sort="last_login" style="width: 160px;">마지막 로그인 <i class="fa-solid fa-sort"></i></th>
-                                <th class="col-status" style="width: 130px;">
+                                <th class="sortable" data-sort="last_login" style="width: 110px;">마지막 로그인 <i class="fa-solid fa-sort"></i></th>
+                                <th class="col-status" style="width: 90px;">
                                     <div class="header-filter-wrapper">
                                         <div id="header-status-filter-dropdown" class="multi-group-dropdown header-filter-dropdown">
                                             <button class="btn-multi-group-trigger" type="button" id="btn-header-status-filter-trigger">
@@ -475,7 +473,100 @@
         </div>
     </div>
 
+    <!-- FILTERS MANAGEMENT MODAL -->
+    <div id="filters-modal" class="tags-overlay hidden">
+        <div class="tags-card">
+            <div class="tags-header">
+                <h3><i class="fa-solid fa-filter"></i> 메일 필터링 관리</h3>
+                <div class="tags-header-actions">
+                    <button id="btn-open-filter-create" class="btn-tag-add-icon" title="새 필터 추가">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="tags-body">
+                <div class="tags-list-container">
+                    <table class="tags-table">
+                        <thead>
+                            <tr>
+                                <th>필터 조건 및 동작</th>
+                                <th style="width: 80px; text-align: center;">작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="filters-modal-list">
+                            <!-- Dynamic filter management items -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FILTER CREATE MODAL -->
+    <div id="filter-create-modal" class="tags-overlay hidden" style="z-index: 210;">
+        <div class="tags-card" style="max-width: 450px; max-height: none;">
+            <div class="tags-header">
+                <h3 id="filter-modal-title"><i class="fa-solid fa-plus"></i> 새 필터 추가</h3>
+            </div>
+            <form id="form-create-filter" style="padding: 20px; display: flex; flex-direction: column; gap: 15px;">
+                <input type="hidden" id="filter-id" name="id" value="">
+                
+                <div class="form-group-filter">
+                    <label for="filter-title" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">필터 제목</label>
+                    <input type="text" id="filter-title" name="title" placeholder="필터 이름을 입력하세요." required autocomplete="off"
+                           style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); color: var(--text-primary); outline: none;">
+                </div>
+
+                <div class="form-group-filter">
+                    <label style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">1. 대상 선택 (중복 가능)</label>
+                    <div style="display: flex; gap: 15px; margin-top: 5px;">
+                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-primary); font-size: 14px;">
+                            <input type="checkbox" id="chk-filter-from" name="filter_from" value="1"> 보낸이
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-primary); font-size: 14px;">
+                            <input type="checkbox" id="chk-filter-subject" name="filter_subject" value="1"> 제목
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-primary); font-size: 14px;">
+                            <input type="checkbox" id="chk-filter-body" name="filter_body" value="1"> 내용
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group-filter">
+                    <label for="filter-keywords" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">2. 키워드 입력 (쉼표 또는 공백 구분)</label>
+                    <input type="text" id="filter-keywords" name="keywords" placeholder="예: 광고, 스팸, 회의" required autocomplete="off"
+                           style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); color: var(--text-primary); outline: none;">
+                </div>
+
+                <div class="form-group-filter">
+                    <label for="filter-action" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">3. 실행할 작업</label>
+                    <select id="filter-action" name="action_val" required
+                            style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); color: var(--text-primary); outline: none; margin-bottom: 10px;">
+                        <option value="delete">삭제 (휴지통)</option>
+                        <option value="move">이동 (보관함)</option>
+                        <option value="copy">복사 (보관함)</option>
+                        <option value="star">즐겨찾기</option>
+                    </select>
+
+                    <div id="filter-dest-folder-container" class="hidden">
+                        <label for="filter-dest-folder" id="lbl-filter-dest-folder" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary); font-size: 13px;">이동/복사할 폴더 선택</label>
+                        <select id="filter-dest-folder" name="dest_folder"
+                                style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); color: var(--text-primary); outline: none;">
+                            <!-- Dynamic folder list options -->
+                        </select>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+                    <button type="submit" id="btn-submit-filter" class="btn-submit" 
+                            style="padding: 10px 15px; border-radius: 6px; border: none; background: var(--accent-color, #3b82f6); color: white; cursor: pointer; font-weight: bold;">추가</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- GROUPS MANAGEMENT MODAL -->
+
     <div id="groups-modal" class="groups-overlay hidden">
         <div class="groups-card">
             <div class="groups-header">
@@ -493,7 +584,7 @@
                         <thead>
                             <tr>
                                 <th>그룹 이름</th>
-                                <th style="width: 190px; text-align: left;">작업</th>
+                                <th style="width: 140px; text-align: left;"></th>
                             </tr>
                         </thead>
                         <tbody id="groups-modal-list">
@@ -502,6 +593,24 @@
                     </table>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- GROUP RENAME MODAL -->
+    <div id="group-rename-modal" class="tag-create-overlay hidden">
+        <div class="tag-create-card">
+            <div class="tag-create-header">
+                <h3><i class="fa-solid fa-pen-to-square"></i> 그룹 이름 변경</h3>
+            </div>
+            <form id="form-rename-group" class="tag-create-form-modal">
+                <input type="hidden" id="rename-group-old-name">
+                <div class="form-group">
+                    <input type="text" id="rename-group-new-name" placeholder="새 이름을 입력하세요." required autocomplete="off">
+                </div>
+                <div class="tag-create-footer">
+                    <button type="submit" class="btn-submit">변경</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -527,58 +636,56 @@
         <div class="settings-card">
             <div class="settings-header">
                 <h3><i class="fa-solid fa-gear"></i> 개인 설정</h3>
+                <div class="settings-header-actions">
+                    <button type="button" id="btn-manage-filters" class="btn-icon-settings" title="메일 필터링">
+                        <i class="fa-solid fa-filter"></i>
+                    </button>
+                    <button type="button" id="btn-manage-tags" class="btn-icon-settings" title="폴더 관리">
+                        <i class="fa-solid fa-folder-tree"></i>
+                    </button>
+                    <button type="button" id="btn-logout" class="btn-icon-settings btn-logout-settings" title="로그아웃">
+                        <span class="logout-icon-wrapper">
+                            <span class="logout-bracket"></span>
+                            <i class="fa-solid fa-arrow-right logout-arrow"></i>
+                        </span>
+                    </button>
+                </div>
             </div>
             <form id="form-settings" class="settings-form">
-                <!-- 2컬럼 그리드 레이아웃 -->
-                <div class="settings-grid">
-                    <!-- 왼쪽 열: 프로필 -->
-                    <div class="settings-col-left">
-                        <div class="form-group profile-group">
-                            <label>프로필</label>
-                            <div class="profile-pic-container-custom">
-                                <input type="file" id="profile-pic-input" accept="image/*" style="display: none;">
-                                <!-- 프로필 클릭 영역 (동그란 형태) -->
-                                <div class="profile-pic-clickable" id="btn-trigger-upload" title="사진 변경">
-                                    <div class="profile-preview-wrapper">
-                                        <img id="set-profile-preview" src="" alt="Profile Preview" class="profile-preview-img hidden">
-                                        <div id="set-profile-placeholder" class="profile-preview-placeholder"><i class="fa-solid fa-user"></i></div>
-                                    </div>
-                                    <!-- 마우스 호버시 나타나는 사진 변경 오버레이 -->
-                                    <div class="profile-overlay">
-                                        <i class="fa-solid fa-camera"></i>
-                                        <span>사진 변경</span>
-                                    </div>
+                <div class="settings-grid-main">
+                    <!-- 왼쪽 열: 프로필 사진 -->
+                    <div class="settings-profile-col">
+                        <div class="profile-pic-container-custom">
+                            <input type="file" id="profile-pic-input" accept="image/*" style="display: none;">
+                            <div class="profile-pic-clickable" id="btn-trigger-upload" title="사진 변경">
+                                <div class="profile-preview-wrapper">
+                                    <img id="set-profile-preview" src="" alt="Profile Preview" class="profile-preview-img hidden">
+                                    <div id="set-profile-placeholder" class="profile-preview-placeholder"><i class="fa-solid fa-user"></i></div>
+                                </div>
+                                <div class="profile-overlay">
+                                    <i class="fa-solid fa-camera"></i>
+                                    <span>사진 변경</span>
                                 </div>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- 오른쪽 열: 아이디 -->
-                    <div class="settings-col-right">
+                    <!-- 오른쪽 열: 입력 필드들 -->
+                    <div class="settings-info-col">
                         <div class="form-group">
                             <label>아이디</label>
                             <div class="input-icon">
                                 <i class="fa-solid fa-envelope"></i>
-                                <input type="text" id="set-username" readonly style="opacity: 0.6; cursor: not-allowed;">
+                                <input type="text" id="set-username" readonly>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <div class="settings-grid">
-                    <!-- 왼쪽 열: 이름 -->
-                    <div class="settings-col-left">
                         <div class="form-group">
                             <label for="set-name">이름</label>
                             <div class="input-icon">
-                                <i class="fa-solid fa-signature"></i>
+                                <i class="fa-solid fa-user"></i>
                                 <input type="text" id="set-name" name="name" required placeholder="이름 입력">
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- 오른쪽 열: 암호 -->
-                    <div class="settings-col-right">
                         <div class="form-group">
                             <label for="set-password">암호</label>
                             <div class="input-icon">

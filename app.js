@@ -98,7 +98,48 @@ document.addEventListener('DOMContentLoaded', () => {
     // Controls
     const btnCompose = document.getElementById('btn-compose');
     const btnRefresh = document.getElementById('btn-refresh');
+    const btnMobileSearchToggle = document.getElementById('btn-mobile-search-toggle');
     const btnLogout = document.getElementById('btn-logout');
+    
+    if (btnMobileSearchToggle) {
+        btnMobileSearchToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const searchBox = document.querySelector('.search-box');
+            if (searchBox) {
+                searchBox.classList.toggle('active');
+                if (searchBox.classList.contains('active')) {
+                    const input = searchBox.querySelector('input');
+                    if (input) {
+                        input.focus();
+                        
+                        // 엔터키 입력 시 검색창 닫기 (실시간 검색은 이미 작동 중)
+                        if (!input.dataset.enterHandlerAdded) {
+                            input.addEventListener('keydown', (e) => {
+                                if (e.key === 'Enter') {
+                                    searchBox.classList.remove('active');
+                                    input.blur();
+                                }
+                            });
+                            input.dataset.enterHandlerAdded = 'true';
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Close mobile search when clicking outside
+    document.addEventListener('click', (e) => {
+        if (document.body.classList.contains('is-mobile-phone')) {
+            const searchBox = document.querySelector('.search-box');
+            const toggleBtn = document.getElementById('btn-mobile-search-toggle');
+            if (searchBox && searchBox.classList.contains('active')) {
+                if (!searchBox.contains(e.target) && !toggleBtn.contains(e.target)) {
+                    searchBox.classList.remove('active');
+                }
+            }
+        }
+    });
 
     // --- 영문 입력 유도 및 제한 로직 추가 ---
     const englishOnlyFields = ['login-username', 'reg-username'];
@@ -138,9 +179,56 @@ document.addEventListener('DOMContentLoaded', () => {
     setupClickOutside(adminModal);
     setupClickOutside(settingsModal);
     setupClickOutside(document.getElementById('tags-modal'));
+    setupClickOutside(document.getElementById('filters-modal'));
+    setupClickOutside(document.getElementById('filter-create-modal'));
     setupClickOutside(document.getElementById('groups-modal'));
     setupClickOutside(document.getElementById('admin-create-user-modal'));
     setupClickOutside(document.getElementById('locked-modal'));
+    setupClickOutside(document.getElementById('group-rename-modal'));
+
+    // Global ESC Key Listener to close modals/popovers one by one (Sequential)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            // 1. Check for popovers first (highest priority)
+            const popovers = ['tag-color-popover', 'tags-popover'];
+            for (const id of popovers) {
+                const el = document.getElementById(id);
+                if (el && !el.classList.contains('hidden')) {
+                    el.classList.add('hidden');
+                    return; // Close only one and exit
+                }
+            }
+
+            // 2. Check for mobile search
+            if (document.body.classList.contains('is-mobile-phone')) {
+                const searchBox = document.querySelector('.search-box');
+                if (searchBox && searchBox.classList.contains('active')) {
+                    searchBox.classList.remove('active');
+                    return;
+                }
+            }
+
+            // 3. Check for modals/overlays (Strict Z-index order priority)
+            const overlays = [
+                'tag-create-modal', 'group-rename-modal', // z-index 3000
+                'filter-create-modal',                    // z-index 210
+                'groups-modal',                           // z-index 210
+                'filters-modal',                          // z-index 200
+                'tags-modal',                             // z-index 200
+                'settings-modal',                         // z-index 120
+                'admin-create-user-modal',                 // z-index 110
+                'compose-modal', 'admin-modal', 'auth-modal', 'locked-modal' // z-index 100
+            ];
+            
+            for (const id of overlays) {
+                const el = document.getElementById(id);
+                if (el && !el.classList.contains('hidden')) {
+                    el.classList.add('hidden');
+                    return; // Close only the topmost and exit
+                }
+            }
+        }
+    });
 
     
     function syncActiveFolderUI() {
@@ -149,9 +237,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // If it's a personal folder (tag), ensure tags container is expanded and arrow is rotated
         if (!isBuiltIn) {
-            const sidebarTagsContainer = document.getElementById('sidebar-tags-container');
+            const sidebarTagsWrapper = document.getElementById('sidebar-tags-wrapper');
             const tagsMenuArrow = document.getElementById('tags-menu-arrow');
-            if (sidebarTagsContainer) sidebarTagsContainer.classList.remove('hidden');
+            if (sidebarTagsWrapper) sidebarTagsWrapper.classList.add('expanded');
             if (tagsMenuArrow) tagsMenuArrow.classList.add('rotated');
         }
         
@@ -240,17 +328,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const btn = document.getElementById('btn-toggle-tags');
         if (!btn) return;
 
+        const sidebar = document.getElementById('sidebar');
+        const isCollapsed = sidebar && sidebar.classList.contains('collapsed');
         const rect = btn.getBoundingClientRect();
         
         const tooltip = document.createElement('div');
         tooltip.id = 'personal-folder-tooltip';
         
-        // Layout and Position below the button
-        tooltip.style.position = 'fixed';
-        tooltip.style.top = `${rect.bottom + 8}px`;
-        tooltip.style.left = `${rect.left + (rect.width / 2)}px`;
-        
         // Colors & Shape
+        tooltip.style.position = 'fixed';
         tooltip.style.backgroundColor = '#ef4444'; // Red
         tooltip.style.color = '#ffffff';
         tooltip.style.padding = '8px 14px';
@@ -261,23 +347,41 @@ document.addEventListener('DOMContentLoaded', () => {
         tooltip.style.zIndex = '9999';
         tooltip.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
         tooltip.style.pointerEvents = 'none';
-        
-        // Animation transitions
         tooltip.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
         tooltip.style.opacity = '0';
-        tooltip.style.transform = 'translateX(-50%) translateY(5px)';
 
-        // Arrow (Triangle pointing up)
+        // Arrow element
         const arrow = document.createElement('div');
         arrow.style.position = 'absolute';
-        arrow.style.top = '-6px';
-        arrow.style.left = '50%';
-        arrow.style.transform = 'translateX(-50%)';
         arrow.style.width = '0';
         arrow.style.height = '0';
-        arrow.style.borderLeft = '6px solid transparent';
-        arrow.style.borderRight = '6px solid transparent';
-        arrow.style.borderBottom = '6px solid #ef4444';
+        
+        if (isCollapsed) {
+            // Position to the right when collapsed
+            tooltip.style.top = `${rect.top + (rect.height / 2)}px`;
+            tooltip.style.left = `${rect.right + 12}px`;
+            tooltip.style.transform = 'translateY(-50%) translateX(5px)';
+            
+            arrow.style.top = '50%';
+            arrow.style.left = '-6px';
+            arrow.style.transform = 'translateY(-50%)';
+            arrow.style.borderTop = '6px solid transparent';
+            arrow.style.borderBottom = '6px solid transparent';
+            arrow.style.borderRight = '6px solid #ef4444';
+        } else {
+            // Position below when expanded
+            tooltip.style.top = `${rect.bottom + 8}px`;
+            tooltip.style.left = `${rect.left + (rect.width / 2)}px`;
+            tooltip.style.transform = 'translateX(-50%) translateY(5px)';
+            
+            arrow.style.top = '-6px';
+            arrow.style.left = '50%';
+            arrow.style.transform = 'translateX(-50%)';
+            arrow.style.borderLeft = '6px solid transparent';
+            arrow.style.borderRight = '6px solid transparent';
+            arrow.style.borderBottom = '6px solid #ef4444';
+        }
+        
         tooltip.appendChild(arrow);
         
         const textSpan = document.createElement('span');
@@ -291,13 +395,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Animate in
         tooltip.style.opacity = '1';
-        tooltip.style.transform = 'translateX(-50%) translateY(0)';
+        if (isCollapsed) {
+            tooltip.style.transform = 'translateY(-50%) translateX(0)';
+        } else {
+            tooltip.style.transform = 'translateX(-50%) translateY(0)';
+        }
 
-        // Hide on scroll to prevent floating away
+        // Hide on scroll
         const handleScroll = () => {
-            tooltip.style.opacity = '0';
-            tooltip.style.transform = 'translateX(-50%) translateY(-5px)';
-            setTimeout(() => tooltip.remove(), 200);
+            tooltip.remove();
             window.removeEventListener('scroll', handleScroll, true);
         };
         window.addEventListener('scroll', handleScroll, true);
@@ -306,7 +412,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
             if (document.body.contains(tooltip)) {
                 tooltip.style.opacity = '0';
-                tooltip.style.transform = 'translateX(-50%) translateY(-5px)';
+                if (isCollapsed) {
+                    tooltip.style.transform = 'translateY(-50%) translateX(-5px)';
+                } else {
+                    tooltip.style.transform = 'translateX(-50%) translateY(-5px)';
+                }
                 setTimeout(() => tooltip.remove(), 200);
             }
             window.removeEventListener('scroll', handleScroll, true);
@@ -465,8 +575,18 @@ document.addEventListener('DOMContentLoaded', () => {
             sidebar.style.width = `${sidebarWidth}px`;
         }
         
+        // 휴대폰(안드로이드폰, 아이폰)인 경우 기본적으로 접힌 상태로 설정 (태블릿 제외)
+        const isMobilePhone = /Android.*Mobi|iPhone/i.test(navigator.userAgent);
+        document.body.classList.toggle('is-mobile-phone', isMobilePhone);
+        
+        const mailSearch = document.getElementById('mail-search');
+        if (isMobilePhone && mailSearch) {
+            mailSearch.placeholder = '검색';
+        }
+        
         const savedSidebarCollapsed = getCookie('sidebarCollapsed');
-        if (savedSidebarCollapsed === 'true') {
+        
+        if (savedSidebarCollapsed === 'true' || (isMobilePhone && savedSidebarCollapsed === null)) {
             sidebarCollapsed = true;
             sidebar.classList.add('collapsed');
             sidebar.style.width = '92px';
@@ -860,7 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <thead>
                 <tr>
                     <th class="col-chk"><input type="checkbox" id="chk-all-emails"></th>
-                    <th class="col-flag"><i class="fa-regular fa-star"></i></th>
+                    <th class="col-flag"></th>
                     <th class="col-sender" style="width: ${colWidths.sender}px;">보낸사람</th>
                     <th class="col-subject" style="width: ${colWidths.subject}px;">제목</th>
                     <th class="col-snippet" style="width: ${colWidths.snippet}px;">내용</th>
@@ -1635,9 +1755,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 actionButtons = `<button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-check"></i> 승인</button>
                                  <button class="btn-admin-action reject" data-id="${user.id}"><i class="fa-solid fa-xmark"></i> 거절</button>`;
             } else if (user.status === 'approved') {
-                statusBadge = '<span class="status-badge approved">활성화</span>';
-                actionButtons = `<button class="btn-admin-action lock" data-id="${user.id}"><i class="fa-solid fa-lock"></i> 잠금</button>
-                                 ${user.username !== 'dj' ? `<button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>` : ''}`;
+                if (user.role === 'admin') {
+                    statusBadge = '<span class="status-badge admin">관리자</span>';
+                } else {
+                    statusBadge = '<span class="status-badge approved">활성화</span>';
+                }
+                const lockButton = user.role !== 'admin' ? `<button class="btn-admin-action lock" data-id="${user.id}"><i class="fa-solid fa-lock"></i> 잠금</button>` : '';
+                const deleteButton = user.username !== 'dj' ? `<button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>` : '';
+                actionButtons = lockButton || deleteButton ? `${lockButton} ${deleteButton}` : '<span style="color: var(--text-muted); font-size: 11px;">보호된 회원</span>';
             } else if (user.status === 'locked') {
                 statusBadge = '<span class="status-badge locked">잠금 중</span>';
                 actionButtons = `<button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-lock-open"></i> 해제</button>
@@ -1803,6 +1928,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Collapsible Tags Menu Toggle
     const btnToggleTags = document.getElementById('btn-toggle-tags');
     const sidebarTagsContainer = document.getElementById('sidebar-tags-container');
+    const sidebarTagsWrapper = document.getElementById('sidebar-tags-wrapper');
     const tagsMenuArrow = document.getElementById('tags-menu-arrow');
     
     function renderTagsPopoverList(tags) {
@@ -1853,7 +1979,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    if (btnToggleTags && sidebarTagsContainer) {
+    if (btnToggleTags && sidebarTagsContainer && sidebarTagsWrapper) {
         btnToggleTags.addEventListener('click', async (e) => {
             if (e.target.closest('#btn-manage-tags')) {
                 return;
@@ -1868,8 +1994,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            if (!sidebar.classList.contains('collapsed') && !sidebarTagsContainer.classList.contains('hidden')) {
-                sidebarTagsContainer.classList.add('hidden');
+            // 펼침/접힘 상태 전환 (애니메이션 적용)
+            if (!sidebar.classList.contains('collapsed') && sidebarTagsWrapper.classList.contains('expanded')) {
+                sidebarTagsWrapper.classList.remove('expanded');
                 if (tagsMenuArrow) tagsMenuArrow.classList.remove('rotated');
                 return;
             }
@@ -1887,7 +2014,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     showPersonalFolderTooltip();
                     if (tagsPopover) tagsPopover.classList.add('hidden');
-                    sidebarTagsContainer.classList.add('hidden');
+                    sidebarTagsWrapper.classList.remove('expanded');
                     return;
                 }
                 
@@ -1914,7 +2041,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                         sidebarTagsContainer.appendChild(a);
                     });
-                    sidebarTagsContainer.classList.remove('hidden');
+                    sidebarTagsWrapper.classList.add('expanded');
                     if (tagsMenuArrow) tagsMenuArrow.classList.add('rotated');
                 }
             } catch (err) {
@@ -1981,20 +2108,50 @@ document.addEventListener('DOMContentLoaded', () => {
             tags.forEach(t => {
                 const tag = t.name;
                 const tr = document.createElement('tr');
+                tr.draggable = true;
+                tr.dataset.tag = tag;
+                tr.className = 'tag-drag-item';
+                tr.style.cursor = 'pointer';
+                
                 const folderColor = getFolderColor(tag);
                 tr.innerHTML = `
                     <td>
-                        <i class="fa-solid fa-folder tag-folder-icon-clickable" style="color: ${folderColor}; margin-right: 8px;" data-tag="${escapeHtml(tag)}"></i> 
+                        <i class="fa-solid fa-folder tag-folder-icon-clickable" style="color: ${folderColor}; margin-right: 8px; cursor: pointer;" data-tag="${escapeHtml(tag)}"></i> 
                         ${escapeHtml(tag)}
                     </td>
                     <td style="text-align: center;">
                         <button class="btn-tag-delete btn-danger-action" data-tag="${escapeHtml(tag)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>
                     </td>
                 `;
+
+                // Drag and Drop
+                tr.addEventListener('dragstart', (e) => {
+                    tr.classList.add('dragging');
+                    e.dataTransfer.setData('text/plain', tag);
+                });
+
+                tr.addEventListener('dragend', () => {
+                    tr.classList.remove('dragging');
+                    saveTagOrder();
+                });
+
+                tr.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    const draggingItem = tagsModalList.querySelector('.dragging');
+                    if (draggingItem && draggingItem !== tr) {
+                        const bounding = tr.getBoundingClientRect();
+                        const offset = e.clientY - bounding.top;
+                        if (offset > bounding.height / 2) {
+                            tr.after(draggingItem);
+                        } else {
+                            tr.before(draggingItem);
+                        }
+                    }
+                });
                 
                 tr.querySelector('.btn-tag-delete').addEventListener('click', async (evt) => {
                     const tName = evt.currentTarget.dataset.tag;
-                    if (!await customConfirm(`'${tName}' 개인 폴더를 삭제하시겠습니까?\n폴더 내부의 모든 메일도 함께 삭제됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
+                    if (!await customConfirm(`'${tName}' 개인 폴더를 삭제하시겠습니까?\n폴더 내부의 모든 메일은 '휴지통'으로 이동됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
                     
                     showToast('폴더 삭제 중...');
                     const r = await apiRequest('delete_tag', 'POST', { tag_name: tName });
@@ -2029,7 +2186,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderColorPicker(tagName) {
+    async function saveTagOrder() {
+        const order = [];
+        tagsModalList.querySelectorAll('.tag-drag-item').forEach(tr => {
+            order.push(tr.dataset.tag);
+        });
+        const res = await apiRequest('update_tag_order', 'POST', { order: JSON.stringify(order) });
+        if (res.success) {
+            loadTags(); // Sidebar refresh
+        } else {
+            showToast(res.message);
+        }
+    }
+
+    function renderColorPicker(targetName, isFilter = false) {
         const colors = [
             '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
             '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
@@ -2041,12 +2211,20 @@ document.addEventListener('DOMContentLoaded', () => {
             item.className = 'tag-color-item';
             item.style.backgroundColor = color;
             item.addEventListener('click', async () => {
-                const res = await apiRequest('set_folder_color', 'POST', { folder_name: tagName, color: color });
-                if (res.success) {
-                    state.tagColors[tagName] = color;
-                    loadTagsModalList(true);
-                    loadTags();
-                    tagColorPopover.classList.add('hidden');
+                if (isFilter) {
+                    const res = await apiRequest('set_filter_color', 'POST', { id: targetName, color: color });
+                    if (res.success) {
+                        loadFiltersModalList();
+                        tagColorPopover.classList.add('hidden');
+                    }
+                } else {
+                    const res = await apiRequest('set_folder_color', 'POST', { folder_name: targetName, color: color });
+                    if (res.success) {
+                        state.tagColors[targetName] = color;
+                        loadTagsModalList(true);
+                        loadTags();
+                        tagColorPopover.classList.add('hidden');
+                    }
                 }
             });
             tagColorGrid.appendChild(item);
@@ -2054,10 +2232,308 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('#tag-color-popover') && !e.target.closest('.tag-folder-icon-clickable')) {
+        if (!e.target.closest('#tag-color-popover') && !e.target.closest('.tag-folder-icon-clickable') && !e.target.closest('.filter-icon-clickable')) {
             tagColorPopover.classList.add('hidden');
         }
     });
+
+    // Filters Management Modal
+    const filtersModal = document.getElementById('filters-modal');
+    const btnManageFilters = document.getElementById('btn-manage-filters');
+    const filtersModalList = document.getElementById('filters-modal-list');
+    const btnOpenFilterCreate = document.getElementById('btn-open-filter-create');
+    const filterCreateModal = document.getElementById('filter-create-modal');
+    const formCreateFilter = document.getElementById('form-create-filter');
+    const filterActionSelect = document.getElementById('filter-action');
+    const filterDestFolderContainer = document.getElementById('filter-dest-folder-container');
+    const filterDestFolderSelect = document.getElementById('filter-dest-folder');
+
+    const filterIdInput = document.getElementById('filter-id');
+    const filterTitleInput = document.getElementById('filter-title');
+    const filterModalTitle = document.getElementById('filter-modal-title');
+    const btnSubmitFilter = document.getElementById('btn-submit-filter');
+
+    let stateFilters = [];
+
+    if (btnManageFilters && filtersModal) {
+        btnManageFilters.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            filtersModal.classList.remove('hidden');
+            loadFiltersModalList();
+        });
+    }
+
+    async function loadFilterDestFolders() {
+        filterDestFolderSelect.innerHTML = '';
+        
+        const draftOpt = document.createElement('option');
+        draftOpt.value = 'Drafts';
+        draftOpt.textContent = '임시 보관함';
+        filterDestFolderSelect.appendChild(draftOpt);
+        
+        try {
+            const res = await apiRequest('list_tags');
+            if (res.success) {
+                const tags = res.tags || [];
+                if (tags.length > 0) {
+                    const customGroup = document.createElement('optgroup');
+                    customGroup.label = '개인 폴더';
+                    tags.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t.name;
+                        opt.textContent = t.name;
+                        customGroup.appendChild(opt);
+                    });
+                    filterDestFolderSelect.appendChild(customGroup);
+                }
+            }
+        } catch (err) {
+            console.error('Error loading tags for filter:', err);
+        }
+    }
+
+    if (btnOpenFilterCreate && filterCreateModal) {
+        btnOpenFilterCreate.addEventListener('click', async () => {
+            if (filterIdInput) filterIdInput.value = '';
+            if (formCreateFilter) formCreateFilter.reset();
+            if (filterModalTitle) filterModalTitle.innerHTML = '<i class="fa-solid fa-plus"></i> 새 필터 추가';
+            if (btnSubmitFilter) btnSubmitFilter.textContent = '추가';
+            if (filterDestFolderContainer) filterDestFolderContainer.classList.add('hidden');
+            
+            await loadFilterDestFolders();
+            filterCreateModal.classList.remove('hidden');
+        });
+    }
+
+    if (filterActionSelect && filterDestFolderContainer) {
+        filterActionSelect.addEventListener('change', () => {
+            const val = filterActionSelect.value;
+            const lbl = document.getElementById('lbl-filter-dest-folder');
+            
+            if (val === 'move' || val === 'copy') {
+                filterDestFolderContainer.classList.remove('hidden');
+                filterDestFolderSelect.setAttribute('required', 'required');
+                
+                if (lbl) {
+                    lbl.textContent = (val === 'move') ? '이동할 폴더 선택' : '복사할 폴더 선택';
+                }
+            } else {
+                filterDestFolderContainer.classList.add('hidden');
+                filterDestFolderSelect.removeAttribute('required');
+            }
+        });
+    }
+
+    if (formCreateFilter) {
+        formCreateFilter.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const filterId = filterIdInput ? filterIdInput.value : '';
+            const title = filterTitleInput ? filterTitleInput.value.trim() : '';
+            const chkFrom = document.getElementById('chk-filter-from').checked;
+            const chkSubject = document.getElementById('chk-filter-subject').checked;
+            const chkBody = document.getElementById('chk-filter-body').checked;
+            const keywords = document.getElementById('filter-keywords').value.trim();
+            const actionVal = filterActionSelect.value;
+            const destFolder = filterDestFolderSelect.value;
+
+            if (!chkFrom && !chkSubject && !chkBody) {
+                showToast('1. 대상 선택에서 최소 하나 이상 선택해야 합니다.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('title', title);
+            formData.append('filter_from', chkFrom ? '1' : '0');
+            formData.append('filter_subject', chkSubject ? '1' : '0');
+            formData.append('filter_body', chkBody ? '1' : '0');
+            formData.append('keywords', keywords);
+            formData.append('action_val', actionVal);
+            if (actionVal === 'move' || actionVal === 'copy') {
+                formData.append('dest_folder', destFolder);
+            }
+
+            let actionName = 'create_filter';
+            if (filterId) {
+                actionName = 'update_filter';
+                formData.append('id', filterId);
+            }
+
+            showToast(filterId ? '필터 수정 중...' : '필터 생성 중...');
+            const res = await apiRequest(actionName, 'POST', formData);
+            showToast(res.message);
+            if (res.success) {
+                filterCreateModal.classList.add('hidden');
+                formCreateFilter.reset();
+                if (filterDestFolderContainer) filterDestFolderContainer.classList.add('hidden');
+                loadFiltersModalList();
+            }
+        });
+    }
+
+    async function saveFilterOrder() {
+        const order = [];
+        filtersModalList.querySelectorAll('.tag-drag-item').forEach(tr => {
+            order.push(tr.dataset.id);
+        });
+        const res = await apiRequest('update_filter_order', 'POST', { order: JSON.stringify(order) });
+        if (!res.success) {
+            showToast(res.message);
+        }
+    }
+
+    async function loadFiltersModalList() {
+        if (!filtersModalList) return;
+        filtersModalList.innerHTML = '<tr><td colspan="2" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
+
+        const res = await apiRequest('list_filters');
+        if (res.success) {
+            const filters = res.filters || [];
+            stateFilters = filters;
+            filtersModalList.innerHTML = '';
+
+            if (filters.length === 0) {
+                filtersModalList.innerHTML = '<tr><td colspan="2" style="text-align: center; color: var(--text-secondary);">설정된 필터가 없습니다.</td></tr>';
+                return;
+            }
+
+            filters.forEach(f => {
+                const tr = document.createElement('tr');
+                tr.className = 'tag-drag-item';
+                tr.draggable = true;
+                tr.dataset.id = f.id;
+
+                const targets = [];
+                if (f.filter_from) targets.push('보낸이');
+                if (f.filter_subject) targets.push('제목');
+                if (f.filter_body) targets.push('내용');
+
+                const keywordsText = f.keywords;
+
+                let actionBadgeHtml = '';
+                const getFolderDisplayName = (folderName) => {
+                    const map = {
+                        'INBOX': '받은 편지함',
+                        'Sent': '보낸 편지함',
+                        'Drafts': '임시 보관함',
+                        'Trash': '휴지통'
+                    };
+                    return map[folderName] || folderName;
+                };
+
+                if (f.action === 'delete') {
+                    actionBadgeHtml = '<span class="status-badge locked" style="font-size: 11px; width: auto; padding: 2px 6px; display: inline-block; vertical-align: middle;">삭제</span>';
+                } else if (f.action === 'move') {
+                    actionBadgeHtml = `<span class="status-badge pending" style="font-size: 11px; width: auto; padding: 2px 6px; display: inline-block; vertical-align: middle;">이동</span> <strong>(${getFolderDisplayName(f.dest_folder)})</strong>`;
+                } else if (f.action === 'copy') {
+                    actionBadgeHtml = `<span class="status-badge approved" style="font-size: 11px; width: auto; padding: 2px 6px; display: inline-block; vertical-align: middle;">복사</span> <strong>(${getFolderDisplayName(f.dest_folder)})</strong>`;
+                } else if (f.action === 'star') {
+                    actionBadgeHtml = '<span class="status-badge admin" style="font-size: 11px; width: auto; padding: 2px 6px; display: inline-block; vertical-align: middle; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">즐겨찾기</span>';
+                }
+                tr.innerHTML = `
+                    <td style="padding: 12px; display: flex; align-items: center; gap: 10px; min-width: 0;">
+                        <span class="filter-icon-clickable" data-id="${f.id}" style="color: ${f.color || '#3b82f6'}; cursor: pointer;"><i class="fa-solid fa-filter"></i></span>
+                        <div style="flex: 1; min-width: 0; text-align: left;">
+                            <span style="font-weight: bold; color: var(--text-primary); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;">${escapeHtml(f.title)}</span>
+                        </div>
+                    </td>
+                    <td style="text-align: center; padding: 12px; vertical-align: middle; width: 140px;">
+                        <div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+                            <button class="btn-filter-action-edit" data-id="${f.id}" title="필터 수정">
+                                <i class="fa-solid fa-pen-to-square"></i> 수정
+                            </button>
+                            <button class="btn-filter-action-delete" data-id="${f.id}" title="필터 삭제">
+                                <i class="fa-solid fa-trash-can"></i> 삭제
+                            </button>
+                        </div>
+                    </td>
+                `;
+
+                tr.addEventListener('dragstart', (e) => {
+                    tr.classList.add('dragging');
+                    e.dataTransfer.setData('text/plain', f.id);
+                });
+
+                tr.addEventListener('dragend', () => {
+                    tr.classList.remove('dragging');
+                    saveFilterOrder();
+                });
+
+                tr.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    const draggingItem = filtersModalList.querySelector('.dragging');
+                    if (draggingItem && draggingItem !== tr) {
+                        const bounding = tr.getBoundingClientRect();
+                        const offset = e.clientY - bounding.top;
+                        if (offset > bounding.height / 2) {
+                            tr.after(draggingItem);
+                        } else {
+                            tr.before(draggingItem);
+                        }
+                    }
+                });
+
+                tr.querySelector('.filter-icon-clickable').addEventListener('click', (evt) => {
+                    evt.stopPropagation();
+                    const filterId = evt.currentTarget.dataset.id;
+                    const rect = evt.currentTarget.getBoundingClientRect();
+                    
+                    tagColorPopover.classList.remove('hidden');
+                    tagColorPopover.style.top = `${rect.bottom + 5}px`;
+                    tagColorPopover.style.left = `${rect.left}px`;
+                    
+                    renderColorPicker(filterId, true);
+                });
+
+                tr.querySelector('.btn-filter-action-edit').addEventListener('click', async (evt) => {
+                    evt.stopPropagation();
+                    const filterId = parseInt(evt.currentTarget.dataset.id, 10);
+                    const filterObj = stateFilters.find(x => x.id === filterId);
+                    if (!filterObj) return;
+
+                    if (filterIdInput) filterIdInput.value = filterObj.id;
+                    if (filterTitleInput) filterTitleInput.value = filterObj.title;
+                    document.getElementById('chk-filter-from').checked = (filterObj.filter_from === 1);
+                    document.getElementById('chk-filter-subject').checked = (filterObj.filter_subject === 1);
+                    document.getElementById('chk-filter-body').checked = (filterObj.filter_body === 1);
+                    document.getElementById('filter-keywords').value = filterObj.keywords;
+                    filterActionSelect.value = filterObj.action;
+
+                    await loadFilterDestFolders();
+
+                    if (filterObj.action === 'move' || filterObj.action === 'copy') {
+                        filterDestFolderSelect.value = filterObj.dest_folder || '';
+                    }
+
+                    if (filterModalTitle) filterModalTitle.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> 필터 수정';
+                    if (btnSubmitFilter) btnSubmitFilter.textContent = '저장';
+
+                    filterActionSelect.dispatchEvent(new Event('change'));
+
+                    filterCreateModal.classList.remove('hidden');
+                });
+
+                tr.querySelector('.btn-filter-action-delete').addEventListener('click', async (evt) => {
+                    evt.stopPropagation();
+                    const filterId = evt.currentTarget.dataset.id;
+                    if (!await customConfirm('이 필터 규칙을 삭제하시겠습니까?', 'fa-solid fa-triangle-exclamation')) return;
+
+                    showToast('필터 삭제 중...');
+                    const r = await apiRequest('delete_filter', 'POST', { id: filterId });
+                    showToast(r.message);
+                    if (r.success) {
+                        loadFiltersModalList();
+                    }
+                });
+
+                filtersModalList.appendChild(tr);
+            });
+        } else {
+            showToast(res.message);
+        }
+    }
+
 
     if (formCreateTag) {
         formCreateTag.addEventListener('submit', async (e) => {
@@ -2268,7 +2744,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resizerSidebar = document.getElementById('resizer-sidebar');
     const resizerList = document.getElementById('resizer-list');
     
-    let sidebarWidth = 300;
+    let sidebarWidth = 240;
     let listHeight = 290;
     let sidebarCollapsed = false;
 
@@ -2276,7 +2752,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resizerSidebar.addEventListener('dblclick', () => {
         sidebarCollapsed = false;
         sidebar.classList.remove('collapsed');
-        sidebarWidth = 300;
+        sidebarWidth = 240;
         sidebar.style.width = `${sidebarWidth}px`;
         
         const tagsPopover = document.getElementById('tags-popover');
@@ -2335,7 +2811,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!ticking) {
                 window.requestAnimationFrame(() => {
                     let width = lastClientX;
-                    if (width < 150) {
+                    if (width < 130) {
                         sidebarCollapsed = true;
                         sidebar.classList.add('collapsed');
                         sidebar.style.width = '92px';
@@ -2566,6 +3042,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Rename Logic
+    const groupRenameModal = document.getElementById('group-rename-modal');
+    const formRenameGroup = document.getElementById('form-rename-group');
+    const renameOldNameInput = document.getElementById('rename-group-old-name');
+    const renameNewNameInput = document.getElementById('rename-group-new-name');
+
+    if (formRenameGroup) {
+        formRenameGroup.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const oldName = renameOldNameInput.value;
+            const newName = renameNewNameInput.value.trim();
+            if (!newName || newName === oldName) {
+                groupRenameModal.classList.add('hidden');
+                return;
+            }
+            const r = await apiRequest('admin_rename_group', 'POST', { old_name: oldName, new_name: newName });
+            showToast(r.message);
+            if (r.success) {
+                groupRenameModal.classList.add('hidden');
+                loadGroupsModalList(true);
+                loadAdminUsers(true);
+            }
+        });
+    }
+
     async function loadGroupsModalList(refreshOnly = false) {
         if (!groupsModalList) return;
         if (!refreshOnly) {
@@ -2579,43 +3080,132 @@ document.addEventListener('DOMContentLoaded', () => {
 
             groups.forEach(group => {
                 const tr = document.createElement('tr');
+                tr.dataset.name = group.name;
+
                 const isDefaultGroup = group.name === '기본';
+                const isAdminGroup = group.name === '관리자';
+                const isProtectedGroup = isAdminGroup; // Only Admin is fully protected
+                const isSystemGroup = isDefaultGroup || isAdminGroup;
                 
-                const actionsHtml = `
-                    <button class="btn-group-lock btn-admin-action lock" data-group="${escapeHtml(group.name)}"><i class="fa-solid fa-lock"></i> 잠금</button>
-                    <button class="btn-group-unlock btn-admin-action approve" data-group="${escapeHtml(group.name)}"><i class="fa-solid fa-lock-open"></i> 해제</button>
-                    ${!isDefaultGroup ? `<button class="btn-group-delete btn-danger-action btn-admin-action delete" data-group="${escapeHtml(group.name)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>` : ''}
-                `;
+                if (!isSystemGroup) {
+                    tr.draggable = true;
+                    tr.className = 'group-drag-item';
+                } else {
+                    tr.className = 'group-static-item';
+                }
+
+                const groupColor = group.color || '#3b82f6';
+
+                const isLocked = group.status === 'locked';
+                const lockToggleBtn = isLocked 
+                    ? `<button class="btn-group-unlock btn-admin-action approve" data-group="${escapeHtml(group.name)}"><i class="fa-solid fa-lock-open"></i> 해제</button>`
+                    : `<button class="btn-group-lock btn-admin-action lock" data-group="${escapeHtml(group.name)}"><i class="fa-solid fa-lock"></i> 잠금</button>`;
+
+                const actionsHtml = !isAdminGroup ? `
+                    ${lockToggleBtn}
+                    ${!isDefaultGroup && !isAdminGroup ? `<button class="btn-group-delete btn-danger-action btn-admin-action delete" data-group="${escapeHtml(group.name)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>` : ''}
+                ` : '<span style="color: var(--text-muted); font-size: 11px;">보호된 그룹</span>';
 
                 tr.innerHTML = `
-                    <td><i class="fa-solid fa-users" style="color: var(--color-primary); margin-right: 8px;"></i> ${escapeHtml(group.name)}</td>
-                    <td class="admin-actions-cell" style="text-align: left; justify-content: flex-start;">
+                    <td class="col-group-name">
+                        <div class="group-name-content">
+                            ${!isSystemGroup ? `<i class="fa-solid fa-grip-vertical drag-handle" style="margin-right: 8px; color: var(--text-muted); cursor: grab; font-size: 14px;"></i>` : `<i class="fa-solid fa-lock" style="margin-right: 8px; color: var(--text-muted); opacity: 0.5; font-size: 12px; width: 14px; text-align: center;" title="이동 불가"></i>`}
+                            <i class="fa-solid fa-users group-icon-clickable" style="color: ${groupColor}; margin-right: 8px; cursor: pointer; font-size: 16px;" data-name="${escapeHtml(group.name)}"></i> 
+                            <span class="group-name-text">${escapeHtml(group.name)}</span>
+                            ${!isAdminGroup ? `<button class="btn-group-rename" data-name="${escapeHtml(group.name)}">변경</button>` : ''}
+                        </div>
+                    </td>
+                    <td class="admin-actions-cell" style="justify-content: flex-start;">
                         ${actionsHtml}
                     </td>
                 `;
 
-                tr.querySelector('.btn-group-lock').addEventListener('click', async (evt) => {
-                    const gName = evt.currentTarget.dataset.group;
-                    if (!await customConfirm(`'${gName}' 그룹의 모든 회원을 일괄 잠금 처리하시겠습니까?`)) return;
-                    showToast('그룹 일괄 잠금 중...');
-                    const r = await apiRequest('admin_lock_group', 'POST', { name: gName });
-                    showToast(r.message);
-                    loadAdminUsers(true);
+                // Drag and Drop Event Listeners (Only for non-system groups)
+                if (!isSystemGroup) {
+                    tr.addEventListener('dragstart', (e) => {
+                        tr.classList.add('dragging');
+                        e.dataTransfer.setData('text/plain', group.name);
+                        e.dataTransfer.effectAllowed = 'move';
+                    });
+
+                    tr.addEventListener('dragend', () => {
+                        tr.classList.remove('dragging');
+                        // Save new order
+                        saveGroupOrder();
+                    });
+
+                    tr.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        const draggingItem = groupsModalList.querySelector('.dragging');
+                        if (draggingItem && draggingItem !== tr) {
+                            const bounding = tr.getBoundingClientRect();
+                            const offset = e.clientY - bounding.top;
+                            if (offset > bounding.height / 2) {
+                                tr.after(draggingItem);
+                            } else {
+                                tr.before(draggingItem);
+                            }
+                        }
+                    });
+                }
+
+                // Rename Logic
+                const renameBtn = tr.querySelector('.btn-group-rename');
+                if (renameBtn) {
+                    renameBtn.addEventListener('click', (evt) => {
+                        evt.stopPropagation();
+                        renameOldNameInput.value = group.name;
+                        renameNewNameInput.value = group.name;
+                        groupRenameModal.classList.remove('hidden');
+                        setTimeout(() => renameNewNameInput.focus(), 100);
+                    });
+                }
+
+                // Color Picker Logic for Group
+                tr.querySelector('.group-icon-clickable').addEventListener('click', (evt) => {
+                    evt.stopPropagation();
+                    const gName = evt.currentTarget.dataset.name;
+                    const rect = evt.currentTarget.getBoundingClientRect();
+
+                    const tagColorPopover = document.getElementById('tag-color-popover');
+                    tagColorPopover.classList.remove('hidden');
+                    tagColorPopover.style.top = `${rect.bottom + 5}px`;
+                    tagColorPopover.style.left = `${rect.left}px`;
+
+                    renderGroupColorPicker(gName);
                 });
 
-                tr.querySelector('.btn-group-unlock').addEventListener('click', async (evt) => {
-                    const gName = evt.currentTarget.dataset.group;
-                    if (!await customConfirm(`'${gName}' 그룹 내 잠금된 회원을 일괄 잠금 해제하시겠습니까?`)) return;
-                    showToast('그룹 일괄 잠금 해제 중...');
-                    const r = await apiRequest('admin_unlock_group', 'POST', { name: gName });
-                    showToast(r.message);
-                    loadAdminUsers(true);
-                });
-
-                if (!isDefaultGroup) {
-                    tr.querySelector('.btn-group-delete').addEventListener('click', async (evt) => {
+                const btnLock = tr.querySelector('.btn-group-lock');
+                if (btnLock) {
+                    btnLock.addEventListener('click', async (evt) => {
                         const gName = evt.currentTarget.dataset.group;
-                        if (!await customConfirm(`'${gName}' 그룹을 삭제하시겠습니까?\n해당 그룹에 속한 사용자들의 그룹 정보가 업데이트됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
+                        if (!await customConfirm(`'${gName}' 그룹의 모든 회원을 일괄 잠금 처리하시겠습니까?`)) return;
+                        showToast('그룹 일괄 잠금 중...');
+                        const r = await apiRequest('admin_lock_group', 'POST', { name: gName });
+                        showToast(r.message);
+                        if (r.success) loadAdminUsers(true);
+                    });
+                }
+
+                const btnUnlock = tr.querySelector('.btn-group-unlock');
+                if (btnUnlock) {
+                    btnUnlock.addEventListener('click', async (evt) => {
+                        const gName = evt.currentTarget.dataset.group;
+                        if (!await customConfirm(`'${gName}' 그룹의 모든 회원의 잠금을 일괄 해제하시겠습니까?`)) return;
+                        showToast('그룹 일괄 잠금 해제 중...');
+                        const r = await apiRequest('admin_unlock_group', 'POST', { name: gName });
+                        showToast(r.message);
+                        if (r.success) loadAdminUsers(true);
+                    });
+                }
+
+                const delBtn = tr.querySelector('.btn-group-delete');
+                if (delBtn) {
+                    delBtn.addEventListener('click', async (evt) => {
+                        const gName = evt.currentTarget.dataset.group;
+                        if (!await customConfirm(`'${gName}' 그룹을 삭제하시겠습니까?\n소속 회원들의 그룹 정보는 '기본'으로 변경됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
+
                         showToast('그룹 삭제 중...');
                         const r = await apiRequest('admin_delete_group', 'POST', { name: gName });
                         showToast(r.message);
@@ -2631,6 +3221,40 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             showToast(res.message);
         }
+    }
+
+    async function saveGroupOrder() {
+        const order = [];
+        groupsModalList.querySelectorAll('.group-drag-item').forEach(tr => {
+            order.push(tr.dataset.name);
+        });
+        const res = await apiRequest('admin_update_group_order', 'POST', { order: JSON.stringify(order) });
+        if (!res.success) showToast(res.message);
+    }
+
+    function renderGroupColorPicker(groupName) {
+        const colors = [
+            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
+            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
+        ];
+
+        const tagColorGrid = document.getElementById('tag-color-grid');
+        const tagColorPopover = document.getElementById('tag-color-popover');
+
+        tagColorGrid.innerHTML = '';
+        colors.forEach(color => {
+            const item = document.createElement('div');
+            item.className = 'tag-color-item';
+            item.style.backgroundColor = color;
+            item.addEventListener('click', async () => {
+                const res = await apiRequest('admin_set_group_color', 'POST', { name: groupName, color: color });
+                if (res.success) {
+                    loadGroupsModalList(true);
+                    tagColorPopover.classList.add('hidden');
+                }
+            });
+            tagColorGrid.appendChild(item);
+        });
     }
 
     if (formCreateGroup) {
@@ -2870,7 +3494,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             // Give 20px padding for safety, let it naturally fill 100% otherwise
             table.style.minWidth = `max(100%, ${total + 20}px)`;
-            table.style.width = '100%'; 
+            table.style.width = '100%';
         };
         updateTableMinWidth();
 
@@ -2896,6 +3520,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     document.body.style.cursor = 'col-resize';
                     resizer.classList.add('dragging');
+                    table.classList.add('resizing');
                     
                     function onMouseMove(event) {
                         const delta = event.clientX - startX;
@@ -2910,6 +3535,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     function onMouseUp() {
                         document.body.style.cursor = '';
                         resizer.classList.remove('dragging');
+                        table.classList.remove('resizing');
                         document.removeEventListener('mousemove', onMouseMove);
                         document.removeEventListener('mouseup', onMouseUp);
                         
@@ -2920,10 +3546,70 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.addEventListener('mouseup', onMouseUp);
                 });
 
-                // Double click to auto-fit
+                // Double click behavior
                 resizer.addEventListener('dblclick', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    
+                    // Special case for date column: toggle position with filler
+                    if (colName === 'date') {
+                        const fillerTh = table.querySelector('thead th.col-filler');
+                        const dateTh = th;
+                        if (fillerTh && dateTh) {
+                            const isFillerAfter = (dateTh.compareDocumentPosition(fillerTh) & Node.DOCUMENT_POSITION_FOLLOWING);
+                            
+                            // Animation logic
+                            const dateCells = Array.from(table.querySelectorAll(`.col-date`));
+                            const fillerCells = Array.from(table.querySelectorAll(`.col-filler`));
+                            
+                            const dateRects = dateCells.map(el => el.getBoundingClientRect());
+                            const fillerRects = fillerCells.map(el => el.getBoundingClientRect());
+                            
+                            if (isFillerAfter) {
+                                // Move date to the absolute right end (after filler)
+                                dateTh.parentNode.appendChild(dateTh);
+                                const rows = table.querySelectorAll('tbody tr');
+                                rows.forEach(tr => {
+                                    const dateTd = tr.querySelector('.col-date');
+                                    if (dateTd) tr.appendChild(dateTd);
+                                });
+                            } else {
+                                // Move filler back to the end (restore original layout)
+                                fillerTh.parentNode.appendChild(fillerTh);
+                                const rows = table.querySelectorAll('tbody tr');
+                                rows.forEach(tr => {
+                                    const fillerTd = tr.querySelector('.col-filler');
+                                    if (fillerTd) tr.appendChild(fillerTd);
+                                });
+                            }
+                            
+                            // Apply FLIP: Invert and Play
+                            dateCells.forEach((el, i) => {
+                                const newRect = el.getBoundingClientRect();
+                                const deltaX = dateRects[i].left - newRect.left;
+                                el.style.transition = 'none';
+                                el.style.transform = `translateX(${deltaX}px)`;
+                                requestAnimationFrame(() => {
+                                    el.style.transition = '';
+                                    el.style.transform = '';
+                                });
+                            });
+                            
+                            fillerCells.forEach((el, i) => {
+                                const newRect = el.getBoundingClientRect();
+                                const deltaX = fillerRects[i].left - newRect.left;
+                                el.style.transition = 'none';
+                                el.style.transform = `translateX(${deltaX}px)`;
+                                requestAnimationFrame(() => {
+                                    el.style.transition = '';
+                                    el.style.transform = '';
+                                });
+                            });
+                            
+                            updateTableMinWidth();
+                            return;
+                        }
+                    }
                     
                     const cells = table.querySelectorAll(`tbody td.${colClass}`);
                     const canvas = document.createElement('canvas');

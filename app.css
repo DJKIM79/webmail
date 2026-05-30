@@ -24,6 +24,8 @@
     --color-primary: #8b5cf6;       /* Violet */
     --color-primary-rgb: 139, 92, 246;
     --color-primary-glow: rgba(139, 92, 246, 0.15);
+    --color-primary-text: #ffffff;
+    --color-primary-hover: #7c3aed;
     --color-secondary: #ec4899;     /* Pink */
     
     --color-success: #10b981;       /* Emerald */
@@ -151,7 +153,7 @@ body {
 
 .btn-compose {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     padding: 14px 24px;
     border-radius: var(--radius-md);
@@ -204,7 +206,7 @@ body {
 
 .nav-item:hover {
     background: var(--bg-hover);
-    color: var(--text-primary);
+    color: var(--color-primary);
 }
 
 .nav-item.active {
@@ -218,7 +220,7 @@ body {
 
 .badge {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     font-size: 12px;
     font-weight: 600;
     padding: 2px 8px;
@@ -247,7 +249,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
+    color: var(--color-primary-text);
     font-size: 16px;
     box-shadow: var(--shadow-md);
 }
@@ -296,7 +298,7 @@ body {
 .btn-icon-footer:hover {
     background: var(--bg-active);
     color: var(--text-primary);
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: var(--color-primary);
 }
 
 /* --------------------------------------------------
@@ -330,6 +332,7 @@ body {
     background: var(--bg-pane-header);
     height: 70px;
     flex-shrink: 0;
+    position: relative; /* 모바일 검색창 절대 위치 기준점 */
 }
 
 .pane-header h2 {
@@ -364,7 +367,8 @@ body {
     transition: all var(--transition-fast);
 }
 
-.search-box input:focus {
+.search-box input:focus,
+.search-box input:hover {
     background: rgba(255, 255, 255, 0.1);
     border-color: var(--color-primary);
 }
@@ -386,7 +390,7 @@ body {
 
 .btn-refresh:hover {
     background: var(--bg-hover);
-    color: var(--text-primary);
+    color: var(--color-primary);
 }
 
 .mail-items-list {
@@ -629,7 +633,7 @@ body {
  * DIALOGS / OVERLAYS (MODALS)
  * -------------------------------------------------- */
 
-.auth-overlay, .compose-overlay, .admin-overlay, .tags-overlay, .groups-overlay, .locked-overlay {
+.auth-overlay, .compose-overlay, .admin-overlay, .tags-overlay, .groups-overlay, .locked-overlay, .admin-create-overlay, .settings-overlay, .tag-create-overlay {
     position: fixed;
     top: 0;
     left: 0;
@@ -640,9 +644,49 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
     opacity: 1;
     transition: opacity var(--transition-normal);
+}
+
+.auth-overlay, .compose-overlay, .admin-overlay, .locked-overlay {
+    z-index: 100;
+}
+
+.admin-create-overlay {
+    z-index: 110;
+}
+
+.settings-overlay {
+    z-index: 120;
+}
+
+.tags-overlay {
+    z-index: 200 !important;
+}
+
+.groups-overlay {
+    z-index: 210 !important;
+}
+
+.tag-create-overlay {
+    z-index: 3000;
+}
+
+.tags-popover {
+    z-index: 3500;
+}
+
+.tag-color-popover {
+    z-index: 4000;
+}
+
+.tag-drag-item {
+    cursor: pointer;
+}
+
+.tag-drag-item.dragging {
+    opacity: 0.4;
+    background: var(--bg-active) !important;
 }
 
 /* Glassmorphism Cards */
@@ -716,7 +760,7 @@ body {
 
 .auth-tab.active {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
 }
 
 .auth-form {
@@ -765,6 +809,18 @@ body {
 .input-icon input:focus {
     border-color: var(--color-primary);
     box-shadow: 0 0 10px var(--border-glow);
+}
+
+#set-username {
+    opacity: 0.4 !important; /* 더욱 비활성화된 느낌 */
+    cursor: not-allowed !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+}
+
+#set-username:focus,
+#set-username:hover {
+    border-color: var(--border-color) !important; /* 기존 외곽선 유지 */
+    box-shadow: none !important; /* 글로우 효과 제거 */
 }
 
 .captcha-container {
@@ -852,7 +908,7 @@ body {
     align-self: flex-end;
     min-width: 120px;
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     padding: 10px 24px;
     border-radius: var(--radius-sm);
@@ -862,10 +918,29 @@ body {
     transition: all var(--transition-fast);
     margin-top: 8px;
 }
-
 .btn-submit:hover {
+    background: var(--color-primary-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px var(--color-primary-glow);
+}
+
+.btn-cancel {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-cancel:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
     opacity: 0.9;
 }
 
@@ -959,7 +1034,7 @@ body {
 
 .btn-send {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     padding: 10px 24px;
     border-radius: var(--radius-sm);
@@ -973,7 +1048,7 @@ body {
 }
 
 .btn-send:hover {
-    background: #7c3aed;
+    background: var(--color-primary-hover);
     box-shadow: 0 4px 12px var(--color-primary-glow);
 }
 
@@ -988,8 +1063,8 @@ body {
 }
 
 .admin-card {
-    width: 900px;
-    max-height: 600px;
+    width: 760px; /* 기존 900px에서 축소 */
+    max-height: 85vh; /* 화면 높이에 맞게 조절 */
 }
 
 .admin-body {
@@ -1009,7 +1084,7 @@ body {
 }
 
 .admin-table th, .admin-table td {
-    padding: 12px 12px;
+    padding: 10px 8px; /* 가로 패딩 축소 */
     text-align: left;
     white-space: nowrap;
 }
@@ -1046,11 +1121,14 @@ body {
 .admin-table th.col-status, .admin-table td.col-status,
 .admin-table th.col-group, .admin-table td.col-group {
     text-align: center;
+    max-width: 110px !important;
+    overflow: hidden;
 }
 
 .admin-table td {
     border-bottom: 1px solid var(--border-color);
     color: var(--text-primary);
+    vertical-align: middle; /* 모든 셀의 상하 중앙 정렬 강제 */
 }
 
 .admin-table tr:hover {
@@ -1078,6 +1156,12 @@ body {
     background: rgba(16, 185, 129, 0.15);
     color: var(--color-success);
     border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-badge.admin {
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .status-badge.locked {
@@ -1449,7 +1533,7 @@ body {
 
 .btn-admin-add-user {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     padding: 8px 16px;
     border-radius: var(--radius-sm);
@@ -1463,7 +1547,7 @@ body {
 }
 
 .btn-admin-add-user:hover {
-    background: #7c3aed;
+    background: var(--color-primary-hover);
     box-shadow: 0 4px 12px var(--color-primary-glow);
 }
 
@@ -1587,6 +1671,7 @@ body {
     cursor: pointer;
     font-size: 14px;
     padding: 2px;
+    margin-left: auto;
     margin-right: 4px;
     display: flex;
     align-items: center;
@@ -1595,30 +1680,54 @@ body {
 }
 
 .btn-manage-tags-inline:hover {
-    color: var(--text-primary);
+    color: var(--color-primary);
     transform: rotate(45deg);
 }
 
 .arrow-icon {
     font-size: 12px !important;
     color: var(--text-secondary);
-    transition: transform var(--transition-normal);
-    margin-right: 16px;
+    transition: all var(--transition-normal);
+}
+
+.nav-item:hover .arrow-icon,
+.arrow-icon:hover {
+    color: var(--color-primary);
+}
+
+#btn-toggle-tags .nav-label {
+    flex-grow: 0;
+}
+
+#tags-menu-arrow {
+    margin-right: 0;
 }
 
 .arrow-icon.rotated {
     transform: rotate(-180deg);
 }
 
+.sidebar-tags-wrapper {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease-in-out, opacity 0.3s ease-in-out;
+    opacity: 0;
+    overflow: hidden;
+}
+
+.sidebar-tags-wrapper.expanded {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
 .sidebar-tags {
+    min-height: 0; /* grid-template-rows: 1fr 를 위해 필수 */
     display: flex;
     flex-direction: column;
     gap: 4px;
     margin-bottom: 8px;
-    overflow: hidden;
     padding-left: 20px;
     margin-top: 4px;
-    transition: all var(--transition-normal);
 }
 
 /* Custom Tags Section styling */
@@ -1816,6 +1925,7 @@ body {
 body.theme-red {
     --color-primary: #ef4444;
     --color-primary-glow: rgba(239, 68, 68, 0.15);
+    --color-primary-hover: #dc2626;
     --color-secondary: #f43f5e;
     --border-glow: rgba(239, 68, 68, 0.3);
     --mesh-color-1: rgba(239, 68, 68, 0.15);
@@ -1825,6 +1935,7 @@ body.theme-red {
 body.theme-orange {
     --color-primary: #f97316;
     --color-primary-glow: rgba(249, 115, 22, 0.15);
+    --color-primary-hover: #ea580c;
     --color-secondary: #facc15;
     --border-glow: rgba(249, 115, 22, 0.3);
     --mesh-color-1: rgba(249, 115, 22, 0.15);
@@ -1834,6 +1945,7 @@ body.theme-orange {
 body.theme-yellow {
     --color-primary: #eab308;
     --color-primary-glow: rgba(234, 179, 8, 0.15);
+    --color-primary-hover: #ca8a04;
     --color-secondary: #f59e0b;
     --border-glow: rgba(234, 179, 8, 0.3);
     --mesh-color-1: rgba(234, 179, 8, 0.15);
@@ -1843,6 +1955,7 @@ body.theme-yellow {
 body.theme-green {
     --color-primary: #22c55e;
     --color-primary-glow: rgba(34, 197, 94, 0.15);
+    --color-primary-hover: #16a34a;
     --color-secondary: #0d9488;
     --border-glow: rgba(34, 197, 94, 0.3);
     --mesh-color-1: rgba(34, 197, 94, 0.15);
@@ -1852,6 +1965,7 @@ body.theme-green {
 body.theme-blue {
     --color-primary: #3b82f6;
     --color-primary-glow: rgba(59, 130, 246, 0.15);
+    --color-primary-hover: #2563eb;
     --color-secondary: #06b6d4;
     --border-glow: rgba(59, 130, 246, 0.3);
     --mesh-color-1: rgba(59, 130, 246, 0.15);
@@ -1861,6 +1975,7 @@ body.theme-blue {
 body.theme-indigo {
     --color-primary: #6366f1;
     --color-primary-glow: rgba(99, 102, 241, 0.15);
+    --color-primary-hover: #4f46e5;
     --color-secondary: #a855f7;
     --border-glow: rgba(99, 102, 241, 0.3);
     --mesh-color-1: rgba(99, 102, 241, 0.15);
@@ -1870,6 +1985,7 @@ body.theme-indigo {
 body.theme-violet {
     --color-primary: #8b5cf6;
     --color-primary-glow: rgba(139, 92, 246, 0.15);
+    --color-primary-hover: #7c3aed;
     --color-secondary: #ec4899;
     --border-glow: rgba(139, 92, 246, 0.3);
     --mesh-color-1: rgba(139, 92, 246, 0.15);
@@ -1877,10 +1993,11 @@ body.theme-violet {
     --mesh-color-3: rgba(59, 130, 246, 0.1);
 }
 body.theme-black {
-    --color-primary: #a0aec0;
-    --color-primary-glow: rgba(160, 174, 192, 0.4);
-    --color-secondary: #718096;
-    --border-glow: rgba(160, 174, 192, 0.2);
+    --color-primary: #ffffff;
+    --color-primary-glow: rgba(255, 255, 255, 0.15);
+    --border-glow: rgba(255, 255, 255, 0.1);
+    --color-primary-text: #000000;
+    --color-primary-hover: #e2e8f0;
 
     --bg-base: #000000;
     --bg-surface: rgba(10, 10, 10, 0.9);
@@ -1903,9 +2020,11 @@ body.theme-black {
     --mesh-color-3: rgba(74, 85, 104, 0.04);
 }
 body.theme-white {
-    --color-primary: #4f46e5;
-    --color-primary-glow: rgba(79, 70, 229, 0.15);
-    --border-glow: rgba(79, 70, 229, 0.1);
+    --color-primary: #000000;
+    --color-primary-glow: rgba(0, 0, 0, 0.08);
+    --border-glow: rgba(0, 0, 0, 0.06);
+    --color-primary-text: #ffffff;
+    --color-primary-hover: #1e293b;
     
     --bg-base: #f8fafc;
     --bg-surface: #ffffff;
@@ -1957,16 +2076,6 @@ body.theme-white .admin-body input,
 body.theme-white .groups-body input {
     background: #f1f5f9;
     color: #0f172a;
-}
-
-body.theme-white .btn-admin-action {
-    background: #f1f5f9;
-    border-color: #e2e8f0;
-    color: #475569;
-}
-
-body.theme-white .btn-admin-action:hover {
-    background: #e2e8f0;
 }
 
 body.theme-white .btn-close-modal {
@@ -2040,7 +2149,7 @@ body.theme-white .btn-close-modal:hover {
 
 .btn-add-tag-submit {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     padding: 0 18px;
     border-radius: var(--radius-sm);
@@ -2055,7 +2164,7 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .btn-add-tag-submit:hover {
-    background: #7c3aed;
+    background: var(--color-primary-hover);
     box-shadow: 0 4px 12px var(--color-primary-glow);
 }
 
@@ -2157,7 +2266,7 @@ body.theme-white .btn-close-modal:hover {
 
 .btn-admin-groups {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     padding: 8px 16px;
     border-radius: var(--radius-sm);
@@ -2171,7 +2280,7 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .btn-admin-groups:hover {
-    background: #7c3aed;
+    background: var(--color-primary-hover);
     box-shadow: 0 4px 12px var(--color-primary-glow);
     transform: translateY(-1px);
 }
@@ -2232,7 +2341,7 @@ body.theme-white .btn-close-modal:hover {
     font-family: "Font Awesome 6 Free";
     font-weight: 900;
     font-size: 10px;
-    color: white;
+    color: var(--color-primary-text);
     display: none;
 }
 .group-checklist-item input[type="checkbox"]:checked::after {
@@ -2248,11 +2357,12 @@ body.theme-white .btn-close-modal:hover {
 }
 .btn-multi-group-trigger {
     width: 100%;
+    height: 28px; /* 고정 높이 부여로 텍스트 길이에 따른 높이 변화 방지 */
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
     border-radius: var(--radius-sm);
-    padding: 6px 4px;
+    padding: 0 4px; /* 상하 패딩 제거하고 고정 높이 사용 */
     font-size: 11px;
     cursor: pointer;
     display: flex;
@@ -2272,12 +2382,15 @@ body.theme-white .btn-close-modal:hover {
     margin-right: 4px;
     margin-left: 8px;
     flex: 1;
+    min-width: 0;
     text-align: left;
+    display: block; /* ellipsis 작동을 위해 block으로 설정 */
+    line-height: 26px; /* 버튼 높이에 맞춰 수직 중앙 정렬 (보더 제외 실질 높이) */
 }
 .multi-group-options {
     position: fixed !important;
     width: 180px;
-    max-height: 200px;
+    max-height: 260px; /* 200px에서 확장하여 4개 이상의 그룹도 스크롤 없이 표시 */
     overflow-y: auto;
     background: var(--bg-surface-solid);
     border: 1px solid var(--border-color);
@@ -2341,7 +2454,7 @@ body.theme-white .btn-close-modal:hover {
     font-family: "Font Awesome 6 Free";
     font-weight: 900;
     font-size: 10px;
-    color: white;
+    color: var(--color-primary-text);
     display: none;
 }
 .multi-group-option-label input[type="checkbox"]:checked::after {
@@ -2399,8 +2512,8 @@ body.theme-white .btn-close-modal:hover {
 
 /* Groups Modal Specific Styles */
 .groups-card {
-    width: 420px;
-    max-height: 500px;
+    width: 440px !important; /* 창 너비 고정 */
+    max-height: 85vh;
 }
 
 .groups-body {
@@ -2417,7 +2530,7 @@ body.theme-white .btn-close-modal:hover {
 
 .btn-add-group-submit {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     padding: 0 18px;
     border-radius: var(--radius-sm);
@@ -2432,7 +2545,7 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .btn-add-group-submit:hover {
-    background: #7c3aed;
+    background: var(--color-primary-hover);
     box-shadow: 0 4px 12px var(--color-primary-glow);
 }
 
@@ -2448,6 +2561,7 @@ body.theme-white .btn-close-modal:hover {
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
+    table-layout: fixed; /* 열 너비를 엄격하게 고정 */
 }
 
 .groups-table th, .groups-table td {
@@ -2469,6 +2583,78 @@ body.theme-white .btn-close-modal:hover {
     border-bottom: 1px solid var(--border-color);
     color: var(--text-primary);
     vertical-align: middle;
+}
+
+.groups-table th:first-child,
+.groups-table td:first-child {
+    /* 너비 제한 해제: 남는 공간을 자연스럽게 채움 */
+}
+
+.groups-table th:last-child,
+.groups-table td:last-child {
+    width: 130px; /* 작업 버튼이 딱 맞게 들어갈 너비로 타이트하게 고정 */
+    text-align: left;
+}
+
+.col-group-name {
+    overflow: hidden;
+}
+
+.group-name-content {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    overflow: hidden;
+}
+
+.group-name-text {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.group-static-item {
+    cursor: default;
+}
+
+.group-drag-item {
+    cursor: pointer; /* 손가락 커서로 변경하여 이동 가능함 암시 */
+    transition: background var(--transition-fast);
+}
+
+.group-drag-item.dragging {
+    opacity: 0.4;
+    background: var(--bg-active) !important;
+}
+
+.btn-group-rename {
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    margin-left: 8px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    transition: all var(--transition-fast);
+}
+
+.btn-group-rename:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.15);
+    border-color: var(--text-muted);
+}
+
+.group-icon-clickable {
+    transition: transform 0.2s ease;
+}
+
+.group-icon-clickable:hover {
+    transform: scale(1.2);
 }
 
 .groups-table tr:hover {
@@ -2537,12 +2723,83 @@ body.theme-white .btn-close-modal:hover {
     margin: 0;
 }
 
+.btn-mobile-search-toggle {
+    display: none;
+}
+
+.is-mobile-phone .btn-mobile-search-toggle {
+    display: flex;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 18px;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: background var(--transition-fast);
+}
+
+.is-mobile-phone .btn-mobile-search-toggle:hover {
+    background: var(--bg-hover);
+}
+
+.is-mobile-phone .search-box {
+    display: none;
+    position: absolute;
+    top: 70px;
+    left: 0;
+    width: 100%;
+    padding: 10px 20px;
+    background: #161621; /* 불투명한 배경색으로 변경하여 가독성 확보 */
+    border-bottom: 1px solid var(--border-color);
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.is-mobile-phone .search-box.active {
+    display: block;
+    animation: fadeInDown 0.2s ease-out;
+}
+
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.is-mobile-phone .search-box input {
+    background: rgba(255, 255, 255, 0.1);
+    height: 44px;
+    font-size: 15px;
+    padding-left: 40px; /* 아이콘 공간 확보 */
+}
+
+.is-mobile-phone .search-box i {
+    left: 32px; /* 패딩 20px + 적절한 내부 여백 */
+}
+
+.is-mobile-phone .pane-header-right {
+    margin-left: auto;
+}
+
 /* Pane header right slot (search box container) */
 .pane-header-right {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
+}
+
+.is-mobile-phone .pane-header-right {
+    margin-left: 30px;
 }
 
 /* ---- LAYOUT OVERRIDES (flex-based) ---- */
@@ -2552,7 +2809,51 @@ body.theme-white .btn-close-modal:hover {
     display: flex !important;
     flex-direction: row !important;
     height: 100vh;
+    height: 100dvh; /* 최신 모바일 브라우저 대응 */
     overflow: hidden;
+}
+
+.is-mobile-phone .sidebar.collapsed .user-actions {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    transform: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    margin-top: 15px !important;
+    margin-left: 4px !important; /* 센터 맞춤 조절 */
+}
+
+.is-mobile-phone .sidebar.collapsed .user-profile-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+}
+
+.is-mobile-phone .sidebar {
+    padding: 24px 12px !important; /* 좌우 패딩 축소 */
+    padding-bottom: 40px !important; /* 모바일 브라우저 하단 바 간섭 방지 */
+}
+
+.is-mobile-phone .sidebar.collapsed {
+    width: 68px !important; /* 패딩 축소에 맞춰 전체 너비도 축소 */
+    padding: 24px 12px !important;
+    padding-bottom: 40px !important;
+}
+
+.is-mobile-phone .sidebar.collapsed .logo,
+.is-mobile-phone .sidebar.collapsed .btn-compose,
+.is-mobile-phone .sidebar.collapsed .user-profile,
+.is-mobile-phone .sidebar.collapsed .nav-item {
+    justify-content: center !important;
+    width: 44px !important;
+    margin: 0 auto !important;
+}
+
+.is-mobile-phone .sidebar.collapsed .user-actions {
+    margin-left: 0 !important;
+    align-items: center !important;
+    width: 100% !important;
 }
 
 /* 메인 영역: 메일 목록 위 + 리더 아래 세로 배치 */
@@ -2718,7 +3019,7 @@ body.theme-white .btn-close-modal:hover {
 
 .btn-compose {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     height: 44px !important;
     width: 100% !important;
@@ -2887,6 +3188,10 @@ body.theme-white .btn-close-modal:hover {
 
 .btn-admin-groups-icon {
     background: var(--color-primary) !important;
+    color: var(--color-primary-text) !important;
+}
+.btn-admin-groups-icon:hover {
+    background: var(--color-primary-hover) !important;
 }
 .tags-header {
     display: flex;
@@ -2903,7 +3208,7 @@ body.theme-white .btn-close-modal:hover {
     width: 32px !important;
     height: 32px !important;
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -2915,7 +3220,7 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .btn-tag-add-icon:hover {
-    background: #7c3aed;
+    background: var(--color-primary-hover);
     box-shadow: 0 4px 12px var(--color-primary-glow);
     transform: translateY(-1px);
 }
@@ -3074,36 +3379,28 @@ body.theme-white .btn-close-modal:hover {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
-    width: 420px;
-    padding: 24px;
+    width: 400px !important;
+    padding: 16px 20px !important; /* 상하 패딩 추가 축소 */
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 8px !important; /* 요소 간격 대폭 축소 */
     animation: scaleUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .settings-header {
-    padding-bottom: 12px;
+    padding-bottom: 8px !important;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
     background: transparent !important;
-}
-
-.settings-header h3 {
-    font-size: 16px;
-    font-weight: 700;
-    color: #ffffff;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    margin-bottom: 4px !important; /* 여백 대폭 축소 */
 }
 
 .settings-form {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 8px !important; /* 폼 내부 요소 간격 축소 */
 }
 
 .theme-selection-grid {
@@ -3200,6 +3497,15 @@ body.theme-white .btn-close-modal:hover {
     gap: 6px;
     border-radius: var(--radius-sm);
     transition: all var(--transition-fast) ease;
+}
+
+.is-mobile-phone .btn-empty-trash span {
+    display: none;
+}
+
+.is-mobile-phone .btn-empty-trash {
+    padding: 6px 10px;
+    gap: 0;
 }
 
 .btn-empty-trash:hover {
@@ -3700,18 +4006,28 @@ body.theme-white .btn-close-modal:hover {
     font-size: 13px;
 }
 
+.mail-list-table th,
+.mail-list-table td {
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mail-list-table.resizing th,
+.mail-list-table.resizing td {
+    transition: none !important;
+}
+
 .mail-list-table thead th {
     position: sticky;
     top: 0;
     z-index: 10;
     background: var(--bg-pane-header, var(--bg-list-pane));
-    border-bottom: 2px solid var(--border-color);
+    border-bottom: 2px solid var(--border-color) !important;
     padding: 12px 8px;
     font-weight: 600;
     color: var(--text-secondary);
     text-align: left;
     font-size: 12px;
-    box-shadow: 0 1px 0 var(--border-color);
+    box-shadow: 0 1px 0 var(--border-color) !important;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3742,7 +4058,12 @@ body.theme-white .btn-close-modal:hover {
     max-width: 32px !important;
 }
 
-.mail-list-table thead th.col-filler,
+.mail-list-table thead th.col-filler {
+    padding: 0 !important;
+    border-bottom: 2px solid var(--border-color) !important;
+    box-shadow: 0 1px 0 var(--border-color) !important;
+}
+
 .mail-list-table tbody td.col-filler {
     padding: 0 !important;
     border: none !important;
@@ -3751,6 +4072,7 @@ body.theme-white .btn-close-modal:hover {
 .mail-list-table thead th.col-date {
     text-align: right !important;
     padding-right: 16px !important;
+    border-right: 1px solid var(--border-color) !important;
 }
 
 .mail-list-table tbody tr.mail-item {
@@ -3782,6 +4104,10 @@ body.theme-white .btn-close-modal:hover {
 
 .mail-list-table tbody td:first-child {
     border-left: 4px solid transparent !important; /* 기본 상태에서 미리 공간을 확보 */
+}
+
+.mail-list-table thead th:first-child {
+    border-left: 4px solid transparent !important; /* 헤더도 내용 셀과 4px 왼쪽 여백을 맞춤 */
 }
 
 .mail-list-table tbody tr.mail-item.selected td:first-child {
@@ -3835,6 +4161,7 @@ body.theme-white .btn-close-modal:hover {
     font-size: 11px !important;
     text-align: right !important;
     padding-right: 16px !important;
+    border-right: 1px solid var(--border-color) !important;
 }
 
 .star-btn {
@@ -3874,6 +4201,10 @@ body.theme-white .btn-close-modal:hover {
     width: 14px !important;
     height: 14px !important;
     accent-color: var(--color-primary) !important;
+}
+
+#chk-all-emails {
+    margin-left: 2px !important;
 }
 
 /* 6. User Profile bottom row layout */
@@ -4084,72 +4415,141 @@ body.theme-white .tags-popover-arrow::after {
     font-size: 14px;
 }
 
-/* 개인 설정 모달 UI 개편 */
-/* 카드 크기를 가로로 더 넓게 키움 (2컬럼 그리드를 위해) */
-.settings-overlay .settings-card {
-    width: 422px !important;
-    max-width: 90% !important;
+/* 개인 설정 모달 부가 요소 스타일 */
+.settings-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
-/* 2컬럼 그리드 레이아웃 */
-.settings-grid {
+.btn-icon-settings {
+    background: var(--bg-hover);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 13px;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-icon-settings:hover {
+    background: var(--bg-active);
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+
+
+.logout-icon-wrapper {
+    position: relative;
+    width: 22px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.logout-bracket {
+    border: 2px solid currentColor;
+    border-right: none;
+    width: 6px;
+    height: 12px;
+    position: absolute;
+    left: 2px;
+    box-sizing: border-box;
+}
+
+.logout-arrow {
+    position: absolute;
+    left: 9px;
+    font-size: 12px;
+}
+
+.btn-logout-settings:hover .logout-arrow {
+    animation: logoutArrowFly 1.5s infinite ease-in-out;
+}
+
+@keyframes logoutArrowFly {
+    0% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    40% {
+        transform: translateX(15px);
+        opacity: 0;
+    }
+    55% {
+        transform: translateX(0);
+        opacity: 0;
+    }
+    100% {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* 2컬럼 메인 그리드 */
+.settings-grid-main {
     display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 20px !important;
+    grid-template-columns: 140px 1fr !important;
+    gap: 30px !important;
+    margin-bottom: 8px !important;
+    align-items: center !important; /* 프로필 사진 세로 중앙 정렬 (이름 필드 기준) */
 }
 
-.settings-col-left {
-    display: flex !important;
-    flex-direction: column !important;
-}
-
-.settings-col-right {
-    display: flex !important;
-    flex-direction: column !important;
-}
-
-/* 프로필 그룹을 중앙 정렬할 수 있게 */
-.profile-group {
+.settings-profile-col {
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
-    text-align: center !important;
+    justify-content: center !important;
 }
 
-/* 프로필 클릭 영역 (동그란 형태) */
+.settings-info-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+}
+
 .profile-pic-container-custom {
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    margin-top: 8px !important;
+    width: 120px !important;
+    height: 120px !important;
 }
 
 .profile-pic-clickable {
     position: relative !important;
-    width: 90px !important;
-    height: 90px !important;
+    width: 120px !important;
+    height: 120px !important;
     border-radius: 50% !important;
     cursor: pointer !important;
     overflow: hidden !important;
     border: 2px solid var(--border-color) !important;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2) !important;
-    background: rgba(255, 255, 255, 0.03) !important;
+    transition: border-color var(--transition-fast) !important;
+}
+
+.profile-pic-clickable:hover {
+    border-color: var(--color-primary) !important;
 }
 
 .profile-pic-clickable .profile-preview-wrapper {
     width: 100% !important;
     height: 100% !important;
-    border: none !important;
-    box-shadow: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+    background: var(--bg-hover) !important;
 }
 
 .profile-pic-clickable .profile-preview-placeholder i {
-    font-size: 36px !important;
+    font-size: 48px !important;
     color: var(--text-muted) !important;
 }
 
@@ -4176,7 +4576,7 @@ body.theme-white .tags-popover-arrow::after {
 }
 
 .profile-overlay i {
-    font-size: 18px !important;
+    font-size: 24px !important;
 }
 
 .profile-overlay span {
@@ -4184,16 +4584,17 @@ body.theme-white .tags-popover-arrow::after {
     font-weight: 500 !important;
 }
 
-/* 테마그룹 마진 */
 .theme-group {
-    margin-top: 10px !important;
+    margin-top: 4px !important;
+    margin-bottom: 4px !important;
 }
 
-/* 설정 저장 버튼 (오른쪽 정렬) */
 .settings-footer {
     display: flex !important;
     justify-content: flex-end !important;
-    margin-top: 10px !important;
+    margin-top: 8px !important;
+    padding-top: 8px !important;
+    border-top: 1px solid var(--border-color) !important;
 }
 
 .btn-save-settings {
@@ -4379,8 +4780,8 @@ body.theme-white .groups-create-form input {
 body.theme-white .admin-create-form-modal input:focus,
 body.theme-white .tags-create-form input:focus,
 body.theme-white .groups-create-form input:focus {
-    border-color: #4f46e5 !important;
-    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15) !important;
+    border-color: var(--color-primary) !important;
+    box-shadow: 0 0 0 3px var(--color-primary-glow) !important;
 }
 
 /* 아이콘 인풋 내 아이콘 색상 */
@@ -4463,6 +4864,41 @@ body.theme-white .btn-admin-action:hover {
     border-color: #cbd5e1 !important;
 }
 
+body.theme-white .btn-admin-action.approve {
+    background: rgba(16, 185, 129, 0.1) !important;
+    color: #10b981 !important;
+    border-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+body.theme-white .btn-admin-action.approve:hover {
+    background: #10b981 !important;
+    color: #ffffff !important;
+}
+
+body.theme-white .btn-admin-action.lock {
+    background: rgba(245, 158, 11, 0.1) !important;
+    color: #f59e0b !important;
+    border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+body.theme-white .btn-admin-action.lock:hover {
+    background: #f59e0b !important;
+    color: #000000 !important;
+}
+
+body.theme-white .btn-admin-action.delete,
+body.theme-white .btn-admin-action.reject {
+    background: rgba(239, 68, 68, 0.1) !important;
+    color: #ef4444 !important;
+    border-color: rgba(239, 68, 68, 0.2) !important;
+}
+
+body.theme-white .btn-admin-action.delete:hover,
+body.theme-white .btn-admin-action.reject:hover {
+    background: #ef4444 !important;
+    color: #ffffff !important;
+}
+
 /* 폴더 삭제 버튼 */
 body.theme-white .btn-tag-delete {
     background: #fee2e2 !important;
@@ -4504,8 +4940,8 @@ body.theme-white .compose-attachments-zone {
 }
 
 body.theme-white .compose-attachments-zone.dragover {
-    border-color: #4f46e5 !important;
-    background: rgba(79, 70, 229, 0.05) !important;
+    border-color: var(--color-primary) !important;
+    background: var(--color-primary-glow) !important;
 }
 
 body.theme-white .compose-attachments-zone .drag-drop-hint {
@@ -4543,15 +4979,7 @@ body.theme-white .compose-footer {
     border-top: 1px solid #f1f5f9 !important;
 }
 
-body.theme-white .btn-send {
-    background: #4f46e5 !important;
-    color: #ffffff !important;
-}
-
-body.theme-white .btn-send:hover {
-    background: #4338ca !important;
-    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25) !important;
-}
+/* btn-send is styled dynamically using variables */
 
 /* 계정 잠금 안내 창 */
 body.theme-white .locked-card p.locked-msg {
@@ -4560,5 +4988,62 @@ body.theme-white .locked-card p.locked-msg {
 
 body.theme-white .locked-card p.locked-sub {
     color: #64748b !important;
+}
+
+/* 필터 관리 버튼 스타일 */
+.btn-filter-action-edit {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.btn-filter-action-edit:hover {
+    background: #3b82f6;
+    color: white;
+}
+body.theme-white .btn-filter-action-edit {
+    background: #eff6ff !important;
+    border: 1px solid #bfdbfe !important;
+    color: #2563eb !important;
+}
+body.theme-white .btn-filter-action-edit:hover {
+    background: #2563eb !important;
+    color: #ffffff !important;
+}
+
+.btn-filter-action-delete {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: var(--color-danger, #ef4444);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.btn-filter-action-delete:hover {
+    background: var(--color-danger, #ef4444);
+    color: white;
+}
+body.theme-white .btn-filter-action-delete {
+    background: #fee2e2 !important;
+    border: 1px solid #fca5a5 !important;
+    color: #dc2626 !important;
+}
+body.theme-white .btn-filter-action-delete:hover {
+    background: #dc2626 !important;
+    color: #ffffff !important;
 }
 

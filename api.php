@@ -64,21 +64,72 @@ try {
 $db->exec("CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
+    color TEXT DEFAULT '#3b82f6',
+    sort_order INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'approved',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )");
 
-// Create table folder_colors to store custom colors for folders
+// Migrate existing groups if columns are missing
+try {
+    $db->exec("ALTER TABLE groups ADD COLUMN color TEXT DEFAULT '#3b82f6'");
+} catch (Exception $e) {}
+try {
+    $db->exec("ALTER TABLE groups ADD COLUMN sort_order INTEGER DEFAULT 0");
+} catch (Exception $e) {}
+try {
+    $db->exec("ALTER TABLE groups ADD COLUMN status TEXT DEFAULT 'approved'");
+} catch (Exception $e) {}
+
+// Create table folder_colors to store custom colors and order for folders
 $db->exec("CREATE TABLE IF NOT EXISTS folder_colors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
     folder_name TEXT NOT NULL,
     color TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
     UNIQUE(username, folder_name)
 )");
 
-// Insert default group
-$db->exec("INSERT OR IGNORE INTO groups (name) VALUES ('기본')");
+// Create table mail_filters
+$db->exec("CREATE TABLE IF NOT EXISTS mail_filters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '새 필터',
+    filter_from INTEGER DEFAULT 0,
+    filter_subject INTEGER DEFAULT 0,
+    filter_body INTEGER DEFAULT 0,
+    keywords TEXT NOT NULL,
+    action TEXT NOT NULL,
+    dest_folder TEXT DEFAULT NULL,
+    color TEXT DEFAULT '#3b82f6',
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)");
 
+// Migrate existing mail_filters if title, color, or sort_order are missing
+try {
+    $db->exec("ALTER TABLE mail_filters ADD COLUMN title TEXT DEFAULT '새 필터'");
+} catch (Exception $e) {}
+try {
+    $db->exec("ALTER TABLE mail_filters ADD COLUMN color TEXT DEFAULT '#3b82f6'");
+} catch (Exception $e) {}
+try {
+    $db->exec("ALTER TABLE mail_filters ADD COLUMN sort_order INTEGER DEFAULT 0");
+} catch (Exception $e) {}
+
+// Migrate existing folder_colors if sort_order column is missing
+try {
+    $db->exec("ALTER TABLE folder_colors ADD COLUMN sort_order INTEGER DEFAULT 0");
+} catch (Exception $e) {}
+
+// Insert default system groups
+try {
+    $db->exec("INSERT OR IGNORE INTO groups (name, color, sort_order) VALUES ('관리자', '#ffffff', -1)");
+    $db->exec("INSERT OR IGNORE INTO groups (name, color, sort_order) VALUES ('기본', '#3b82f6', 0)");
+    // Force 'dj' into '관리자' group and role 'admin'
+    $db->exec("UPDATE users SET group_name = '관리자', role = 'admin' WHERE username = 'dj'");
+} catch (Exception $e) {}
 
 // --- HELPER FUNCTIONS ---
 
@@ -436,7 +487,103 @@ function parse_email_from_content(string $content, string $filename, string $fol
     ];
 }
 
+function apply_mail_filters(string $username, PDO $db): void {
+    // 1. Get user's filters
+    $stmt = $db->prepare("SELECT * FROM mail_filters WHERE username = :username ORDER BY id ASC");
+    $stmt->execute([':username' => $username]);
+    $filters = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    if (empty($filters)) {
+        return;
+    }
+    
+    // 2. Scan for new files
+    $new_files = secure_list_files($username, 'new');
+    if (empty($new_files)) {
+        return;
+    }
+    
+    foreach ($new_files as $file) {
+        $content = secure_read_file($username, 'new', $file);
+        if (!$content) {
+            continue;
+        }
+        
+        $email = parse_email_from_content($content, $file, 'INBOX');
+        if (!$email) {
+            continue;
+        }
+        
+        $email_from = $email['from'];
+        $email_subject = $email['subject'];
+        $email_body = !empty($email['text_body']) ? $email['text_body'] : strip_tags($email['html_body']);
+        
+        foreach ($filters as $filter) {
+            $match_text = '';
+            if ($filter['filter_from']) {
+                $match_text .= ' ' . $email_from;
+            }
+            if ($filter['filter_subject']) {
+                $match_text .= ' ' . $email_subject;
+            }
+            if ($filter['filter_body']) {
+                $match_text .= ' ' . $email_body;
+            }
+            
+            // Split keywords by comma or space
+            $keywords = preg_split('/[\s,]+/', trim($filter['keywords']), -1, PREG_SPLIT_NO_EMPTY);
+            $is_matched = false;
+            
+            foreach ($keywords as $kw) {
+                if (empty($kw)) continue;
+                if (mb_stripos($match_text, $kw) !== false) {
+                    $is_matched = true;
+                    break;
+                }
+            }
+            
+            if ($is_matched) {
+                $action = $filter['action'];
+                $dest_folder = $filter['dest_folder'];
+                
+                if ($action === 'delete') {
+                    // Delete (move to Trash)
+                    secure_move_file($username, 'new', '.Trash/cur', $file);
+                } elseif ($action === 'move' && !empty($dest_folder)) {
+                    // Move to destination tag/folder
+                    $dest_sub = ($dest_folder === 'INBOX') ? 'cur' : '.' . $dest_folder . '/cur';
+                    secure_move_file($username, 'new', $dest_sub, $file);
+                } elseif ($action === 'copy' && !empty($dest_folder)) {
+                    // Copy to destination tag/folder
+                    $dest_sub = ($dest_folder === 'INBOX') ? 'cur' : '.' . $dest_folder . '/cur';
+                    $new_filename = time() . '.' . uniqid() . '.onto.kr:2,';
+                    secure_write_file($username, $dest_sub, $new_filename, $content);
+                    
+                    // Keep original in INBOX/cur with proper Maildir suffix
+                    $parts = explode(':2,', $file);
+                    $orig_dest_name = $parts[0] . ':2,';
+                    secure_move_file($username, 'new', 'cur', $file, $orig_dest_name);
+                } elseif ($action === 'star') {
+                    // Star (flag) the email and move to INBOX/cur
+                    $parts = explode(':2,', $file);
+                    $base_name = $parts[0];
+                    $flags = $parts[1] ?? '';
+                    if (strpos($flags, 'F') === false) {
+                        $flags .= 'F';
+                    }
+                    $new_filename = $base_name . ':2,' . $flags;
+                    secure_move_file($username, 'new', 'cur', $file, $new_filename);
+                }
+                
+                // Mail processed, break from filter check for this file
+                break;
+            }
+        }
+    }
+}
+
 // --- ROUTING ---
+
 
 $action = $_GET['action'] ?? '';
 
@@ -596,6 +743,10 @@ switch ($action) {
         check_auth();
         $username = $_SESSION['username'];
         $folder = $_GET['folder'] ?? 'INBOX';
+        
+        // Apply mail filtering rules on new emails
+        apply_mail_filters($username, $db);
+
         
         if (!in_array($folder, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Starred'], true) && !preg_match('/^[a-zA-Z0-9_\-\x{ac00}-\x{d7a3}\x{3130}-\x{318f}]+$/u', $folder)) {
             respond(false, '잘못된 폴더입니다.');
@@ -873,9 +1024,84 @@ switch ($action) {
 
     case 'admin_list_groups':
         check_admin();
-        $stmt = $db->query("SELECT * FROM groups ORDER BY CASE WHEN name = '기본' THEN 0 ELSE 1 END, name ASC");
+        $stmt = $db->query("SELECT * FROM groups ORDER BY CASE WHEN name = '관리자' THEN 0 WHEN name = '기본' THEN 1 ELSE 2 END, sort_order ASC, name ASC");
         $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
         respond(true, '성공', ['groups' => $groups]);
+        break;
+
+    case 'admin_rename_group':
+        check_admin();
+        $old_name = trim($_POST['old_name'] ?? '');
+        $new_name = trim($_POST['new_name'] ?? '');
+        if (empty($old_name) || empty($new_name)) {
+            respond(false, '이름이 필요합니다.');
+        }
+        if ($old_name === '관리자') {
+            respond(false, '관리자 그룹 이름은 변경할 수 없습니다.');
+        }
+        if (!preg_match('/^[a-zA-Z0-9_\-가-힣\s]+$/u', $new_name)) {
+            respond(false, '그룹 이름은 영문, 숫자, 한글, 밑줄(_), 하이픈(-)만 사용 가능합니다.');
+        }
+
+        try {
+            $db->beginTransaction();
+            
+            // Update users group names
+            $stmt = $db->query("SELECT id, group_name FROM users");
+            $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($users as $u) {
+                $groups = array_filter(array_map('trim', explode(',', $u['group_name'] ?? '')));
+                if (($key = array_search($old_name, $groups)) !== false) {
+                    $groups[$key] = $new_name;
+                    $new_group_name_str = implode(', ', $groups);
+                    $stmt2 = $db->prepare("UPDATE users SET group_name = :group_name WHERE id = :id");
+                    $stmt2->execute([':group_name' => $new_group_name_str, ':id' => $u['id']]);
+                }
+            }
+
+            // Update group name in groups table
+            $stmt = $db->prepare("UPDATE groups SET name = :new_name WHERE name = :old_name");
+            $stmt->execute([':new_name' => $new_name, ':old_name' => $old_name]);
+            
+            $db->commit();
+            respond(true, '그룹 이름이 변경되었습니다.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            respond(false, '이미 존재하는 그룹 이름이거나 변경에 실패했습니다.');
+        }
+        break;
+
+    case 'admin_set_group_color':
+        check_admin();
+        $name = trim($_POST['name'] ?? '');
+        $color = trim($_POST['color'] ?? '');
+        if (empty($name) || empty($color)) {
+            respond(false, '필수 항목 누락');
+        }
+        $stmt = $db->prepare("UPDATE groups SET color = :color WHERE name = :name");
+        $stmt->execute([':color' => $color, ':name' => $name]);
+        respond(true, '색상이 변경되었습니다.');
+        break;
+
+    case 'admin_update_group_order':
+        check_admin();
+        $order = json_decode($_POST['order'] ?? '[]', true);
+        if (empty($order)) {
+            respond(false, '순서 정보가 없습니다.');
+        }
+        
+        try {
+            $db->beginTransaction();
+            $stmt = $db->prepare("UPDATE groups SET sort_order = :idx WHERE name = :name");
+            foreach ($order as $idx => $name) {
+                $stmt->execute([':idx' => $idx, ':name' => $name]);
+            }
+            $db->commit();
+            respond(true, '순서가 저장되었습니다.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            respond(false, '순서 저장 실패');
+        }
         break;
 
     case 'admin_create_group':
@@ -900,8 +1126,8 @@ switch ($action) {
     case 'admin_delete_group':
         check_admin();
         $name = trim($_POST['name'] ?? '');
-        if ($name === '기본') {
-            respond(false, '기본 그룹은 삭제할 수 없습니다.');
+        if ($name === '기본' || $name === '관리자') {
+            respond(false, '기본 또는 관리자 그룹은 삭제할 수 없습니다.');
         }
         
         // Update users in this group: remove the deleted group name from their comma-separated list
@@ -933,22 +1159,38 @@ switch ($action) {
         if (empty($name)) {
             respond(false, '그룹 이름이 필요합니다.');
         }
-        
-        // Get all approved users in this group (except dj) using INSTR matching
-        $stmt = $db->prepare("SELECT username FROM users WHERE INSTR(', ' || group_name || ', ', ', ' || :name || ', ') > 0 AND status = 'approved' AND username != 'dj'");
-        $stmt->execute([':name' => $name]);
-        $users = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        
-        foreach ($users as $uname) {
-            $email = $uname . '@onto.kr';
-            $cmd = "sudo /usr/local/bin/manage_mail_user.sh lock " . escapeshellarg($email);
-            exec($cmd);
+        if ($name === '관리자') {
+            respond(false, '관리자 그룹은 잠글 수 없습니다.');
         }
-        
-        $stmt = $db->prepare("UPDATE users SET status = 'locked' WHERE INSTR(', ' || group_name || ', ', ', ' || :name || ', ') > 0 AND status = 'approved' AND username != 'dj'");
-        $stmt->execute([':name' => $name]);
-        
-        respond(true, '그룹 내 모든 회원이 잠금 처리되었습니다.');
+
+        try {
+            $db->beginTransaction();
+            
+            // 1. Update group status
+            $stmt = $db->prepare("UPDATE groups SET status = 'locked' WHERE name = :name");
+            $stmt->execute([':name' => $name]);
+
+            // 2. Get all approved users in this group (except admins)
+            $stmt = $db->prepare("SELECT username FROM users WHERE INSTR(', ' || group_name || ', ', ', ' || :name || ', ') > 0 AND status = 'approved' AND role != 'admin' AND username != 'dj'");
+            $stmt->execute([':name' => $name]);
+            $users = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            
+            foreach ($users as $uname) {
+                $email = $uname . '@onto.kr';
+                $cmd = "sudo /usr/local/bin/manage_mail_user.sh lock " . escapeshellarg($email);
+                exec($cmd);
+            }
+            
+            // 3. Update their status to locked
+            $stmt = $db->prepare("UPDATE users SET status = 'locked' WHERE INSTR(', ' || group_name || ', ', ', ' || :name || ', ') > 0 AND status = 'approved' AND role != 'admin' AND username != 'dj'");
+            $stmt->execute([':name' => $name]);
+            
+            $db->commit();
+            respond(true, '그룹 상태가 잠금으로 변경되었으며, 해당 그룹 내 일반 회원들의 계정이 잠금 처리되었습니다.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            respond(false, '잠금 처리 중 오류가 발생했습니다.');
+        }
         break;
 
     case 'admin_unlock_group':
@@ -957,22 +1199,51 @@ switch ($action) {
         if (empty($name)) {
             respond(false, '그룹 이름이 필요합니다.');
         }
-        
-        // Get all locked users in this group using INSTR matching
-        $stmt = $db->prepare("SELECT username FROM users WHERE INSTR(', ' || group_name || ', ', ', ' || :name || ', ') > 0 AND status = 'locked'");
-        $stmt->execute([':name' => $name]);
-        $users = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        
-        foreach ($users as $uname) {
-            $email = $uname . '@onto.kr';
-            $cmd = "sudo /usr/local/bin/manage_mail_user.sh unlock " . escapeshellarg($email);
-            exec($cmd);
+
+        try {
+            $db->beginTransaction();
+            
+            // 1. Update group status to approved
+            $stmt = $db->prepare("UPDATE groups SET status = 'approved' WHERE name = :name");
+            $stmt->execute([':name' => $name]);
+
+            // 2. Find all locked users in this group (except admins)
+            $stmt = $db->prepare("SELECT id, username, group_name FROM users WHERE INSTR(', ' || group_name || ', ', ', ' || :name || ', ') > 0 AND status = 'locked' AND role != 'admin' AND username != 'dj'");
+            $stmt->execute([':name' => $name]);
+            $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // 3. For each user, check if they belong to ANY OTHER locked group
+            $all_groups_stmt = $db->query("SELECT name FROM groups WHERE status = 'locked'");
+            $locked_groups = $all_groups_stmt->fetchAll(PDO::FETCH_COLUMN);
+
+            foreach ($users as $user) {
+                $u_groups = array_filter(array_map('trim', explode(',', $user['group_name'] ?? '')));
+                $still_locked = false;
+                foreach ($u_groups as $ug) {
+                    if ($ug === $name) continue; // Skip current group
+                    if (in_array($ug, $locked_groups)) {
+                        $still_locked = true;
+                        break;
+                    }
+                }
+
+                if (!$still_locked) {
+                    // Unlock only if no other groups are locked
+                    $email = $user['username'] . '@onto.kr';
+                    $cmd = "sudo /usr/local/bin/manage_mail_user.sh unlock " . escapeshellarg($email);
+                    exec($cmd);
+
+                    $stmt_upd = $db->prepare("UPDATE users SET status = 'approved' WHERE id = :id");
+                    $stmt_upd->execute([':id' => $user['id']]);
+                }
+            }
+            
+            $db->commit();
+            respond(true, '그룹 상태가 해제되었으며, 다른 잠긴 그룹에 속하지 않은 회원들의 계정이 활성화되었습니다.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            respond(false, '해제 처리 중 오류가 발생했습니다.');
         }
-        
-        $stmt = $db->prepare("UPDATE users SET status = 'approved' WHERE INSTR(', ' || group_name || ', ', ', ' || :name || ', ') > 0 AND status = 'locked'");
-        $stmt->execute([':name' => $name]);
-        
-        respond(true, '그룹 내 잠금된 회원의 잠금이 해제되었습니다.');
         break;
 
     case 'admin_update_user_group':
@@ -1241,10 +1512,17 @@ switch ($action) {
         exec($cmd, $output, $return_var);
         $tags = [];
         
-        // Fetch saved colors from database
-        $stmt = $db->prepare("SELECT folder_name, color FROM folder_colors WHERE username = :username");
+        // Fetch saved colors and order from database
+        $stmt = $db->prepare("SELECT folder_name, color, sort_order FROM folder_colors WHERE username = :username");
         $stmt->execute([':username' => $username]);
-        $colors = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        $folder_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $colors = [];
+        $orders = [];
+        foreach ($folder_data as $row) {
+            $colors[$row['folder_name']] = $row['color'];
+            $orders[$row['folder_name']] = $row['sort_order'];
+        }
         
         if ($return_var === 0) {
             foreach ($output as $line) {
@@ -1255,13 +1533,51 @@ switch ($action) {
                     if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts'], true)) {
                         $tags[] = [
                             'name' => $tag_name,
-                            'color' => $colors[$tag_name] ?? null
+                            'color' => $colors[$tag_name] ?? null,
+                            'sort_order' => $orders[$tag_name] ?? 9999
                         ];
                     }
                 }
             }
         }
+        
+        // Sort tags based on sort_order and name
+        usort($tags, function($a, $b) {
+            if ($a['sort_order'] !== $b['sort_order']) {
+                return $a['sort_order'] - $b['sort_order'];
+            }
+            return strcmp($a['name'], $b['name']);
+        });
+        
         respond(true, '성공', ['tags' => $tags]);
+        break;
+
+    case 'update_tag_order':
+        check_auth();
+        $username = $_SESSION['username'];
+        $order = json_decode($_POST['order'] ?? '[]', true);
+        if (empty($order)) {
+            respond(false, '순서 정보가 없습니다.');
+        }
+        
+        try {
+            $db->beginTransaction();
+            foreach ($order as $idx => $tag_name) {
+                $stmt = $db->prepare("INSERT INTO folder_colors (username, folder_name, color, sort_order) 
+                                     VALUES (:username, :folder_name, '#3b82f6', :idx) 
+                                     ON CONFLICT(username, folder_name) DO UPDATE SET sort_order = EXCLUDED.sort_order");
+                $stmt->execute([
+                    ':username' => $username,
+                    ':folder_name' => $tag_name,
+                    ':idx' => $idx
+                ]);
+            }
+            $db->commit();
+            respond(true, '순서가 저장되었습니다.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            respond(false, '순서 저장 실패: ' . $e->getMessage());
+        }
         break;
 
     case 'set_folder_color':
@@ -1443,7 +1759,178 @@ switch ($action) {
         }
         break;
 
+    case 'list_filters':
+        check_auth();
+        $username = $_SESSION['username'];
+        $stmt = $db->prepare("SELECT * FROM mail_filters WHERE username = :username ORDER BY sort_order ASC, id ASC");
+        $stmt->execute([':username' => $username]);
+        $filters = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        respond(true, '성공', ['filters' => $filters]);
+        break;
+
+    case 'create_filter':
+        check_auth();
+        $username = $_SESSION['username'];
+        $title = trim($_POST['title'] ?? '');
+        $filter_from = isset($_POST['filter_from']) ? (int)$_POST['filter_from'] : 0;
+        $filter_subject = isset($_POST['filter_subject']) ? (int)$_POST['filter_subject'] : 0;
+        $filter_body = isset($_POST['filter_body']) ? (int)$_POST['filter_body'] : 0;
+        $keywords = trim($_POST['keywords'] ?? '');
+        $action_val = trim($_POST['action_val'] ?? '');
+        $dest_folder = trim($_POST['dest_folder'] ?? '');
+
+        if (empty($title)) {
+            respond(false, '필터 제목을 입력하세요.');
+        }
+        if ($filter_from === 0 && $filter_subject === 0 && $filter_body === 0) {
+            respond(false, '검색 대상(보낸이, 제목, 내용)을 최소 하나 이상 선택해야 합니다.');
+        }
+        if (empty($keywords)) {
+            respond(false, '검색할 키워드를 입력하세요.');
+        }
+        if (empty($action_val) || !in_array($action_val, ['delete', 'move', 'copy', 'star'], true)) {
+            respond(false, '올바른 작업을 선택하세요.');
+        }
+        if (($action_val === 'move' || $action_val === 'copy') && empty($dest_folder)) {
+            respond(false, '이동 또는 복사할 보관함을 선택하세요.');
+        }
+
+        // Get max sort_order
+        $stmt = $db->prepare("SELECT MAX(sort_order) FROM mail_filters WHERE username = :username");
+        $stmt->execute([':username' => $username]);
+        $max_order = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare("INSERT INTO mail_filters (username, title, filter_from, filter_subject, filter_body, keywords, action, dest_folder, sort_order) VALUES (:username, :title, :filter_from, :filter_subject, :filter_body, :keywords, :action, :dest_folder, :sort_order)");
+        $stmt->execute([
+            ':username' => $username,
+            ':title' => $title,
+            ':filter_from' => $filter_from,
+            ':filter_subject' => $filter_subject,
+            ':filter_body' => $filter_body,
+            ':keywords' => $keywords,
+            ':action' => $action_val,
+            ':dest_folder' => empty($dest_folder) ? null : $dest_folder,
+            ':sort_order' => $max_order + 1
+        ]);
+
+        respond(true, '필터가 생성되었습니다.');
+        break;
+
+    case 'update_filter':
+        check_auth();
+        $username = $_SESSION['username'];
+        $filter_id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
+        $title = trim($_POST['title'] ?? '');
+        $filter_from = isset($_POST['filter_from']) ? (int)$_POST['filter_from'] : 0;
+        $filter_subject = isset($_POST['filter_subject']) ? (int)$_POST['filter_subject'] : 0;
+        $filter_body = isset($_POST['filter_body']) ? (int)$_POST['filter_body'] : 0;
+        $keywords = trim($_POST['keywords'] ?? '');
+        $action_val = trim($_POST['action_val'] ?? '');
+        $dest_folder = trim($_POST['dest_folder'] ?? '');
+
+        if ($filter_id <= 0) {
+            respond(false, '잘못된 필터 ID입니다.');
+        }
+        if (empty($title)) {
+            respond(false, '필터 제목을 입력하세요.');
+        }
+        if ($filter_from === 0 && $filter_subject === 0 && $filter_body === 0) {
+            respond(false, '검색 대상(보낸이, 제목, 내용)을 최소 하나 이상 선택해야 합니다.');
+        }
+        if (empty($keywords)) {
+            respond(false, '검색할 키워드를 입력하세요.');
+        }
+        if (empty($action_val) || !in_array($action_val, ['delete', 'move', 'copy', 'star'], true)) {
+            respond(false, '올바른 작업을 선택하세요.');
+        }
+        if (($action_val === 'move' || $action_val === 'copy') && empty($dest_folder)) {
+            respond(false, '이동 또는 복사할 보관함을 선택하세요.');
+        }
+
+        $stmt = $db->prepare("UPDATE mail_filters SET title = :title, filter_from = :filter_from, filter_subject = :filter_subject, filter_body = :filter_body, keywords = :keywords, action = :action, dest_folder = :dest_folder WHERE id = :id AND username = :username");
+        $stmt->execute([
+            ':id' => $filter_id,
+            ':username' => $username,
+            ':title' => $title,
+            ':filter_from' => $filter_from,
+            ':filter_subject' => $filter_subject,
+            ':filter_body' => $filter_body,
+            ':keywords' => $keywords,
+            ':action' => $action_val,
+            ':dest_folder' => empty($dest_folder) ? null : $dest_folder
+        ]);
+
+        respond(true, '필터가 수정되었습니다.');
+        break;
+
+    case 'update_filter_order':
+        check_auth();
+        $username = $_SESSION['username'];
+        $order_json = $_POST['order'] ?? '';
+        $order = json_decode($order_json, true);
+
+        if (!is_array($order)) {
+            respond(false, '올바르지 않은 정렬 데이터입니다.');
+        }
+
+        $db->beginTransaction();
+        try {
+            $stmt = $db->prepare("UPDATE mail_filters SET sort_order = :sort_order WHERE id = :id AND username = :username");
+            foreach ($order as $index => $id) {
+                $stmt->execute([
+                    ':sort_order' => $index,
+                    ':id' => (int)$id,
+                    ':username' => $username
+                ]);
+            }
+            $db->commit();
+            respond(true, '정렬이 변경되었습니다.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            respond(false, '정렬 변경에 실패했습니다: ' . $e->getMessage());
+        }
+        break;
+
+    case 'set_filter_color':
+        check_auth();
+        $username = $_SESSION['username'];
+        $filter_id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
+        $color = trim($_POST['color'] ?? '');
+
+        if ($filter_id <= 0 || empty($color)) {
+            respond(false, '올바르지 않은 요청입니다.');
+        }
+
+        $stmt = $db->prepare("UPDATE mail_filters SET color = :color WHERE id = :id AND username = :username");
+        $stmt->execute([
+            ':color' => $color,
+            ':id' => $filter_id,
+            ':username' => $username
+        ]);
+
+        respond(true, '필터 색상이 변경되었습니다.');
+        break;
+
+    case 'delete_filter':
+        check_auth();
+        $username = $_SESSION['username'];
+        $filter_id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
+
+        if ($filter_id <= 0) {
+            respond(false, '잘못된 필터 ID입니다.');
+        }
+
+        $stmt = $db->prepare("DELETE FROM mail_filters WHERE id = :id AND username = :username");
+        $stmt->execute([
+            ':id' => $filter_id,
+            ':username' => $username
+        ]);
+
+        respond(true, '필터가 삭제되었습니다.');
+        break;
+
     default:
+
         respond(false, '잘못된 요청입니다.');
         break;
 }
