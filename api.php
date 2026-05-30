@@ -159,6 +159,36 @@ function secure_write_file(string $username, string $folder, string $filename, s
     return false;
 }
 
+function find_email_path(string $username, string $folder, string $email_id): ?array {
+    $sub_paths = [];
+    if ($folder === 'INBOX') {
+        $sub_paths = ['cur', 'new'];
+    } else {
+        $sub_paths = ['.' . $folder . '/cur', '.' . $folder . '/new'];
+    }
+    
+    // 1. Try exact match first
+    foreach ($sub_paths as $sub) {
+        $files = secure_list_files($username, $sub);
+        if (in_array($email_id, $files, true)) {
+            return ['sub' => $sub, 'id' => $email_id];
+        }
+    }
+    
+    // 2. Try base ID match (robustness against renames/flag changes)
+    $base_id = explode(':2,', $email_id)[0];
+    foreach ($sub_paths as $sub) {
+        $files = secure_list_files($username, $sub);
+        foreach ($files as $file) {
+            if (explode(':2,', $file)[0] === $base_id) {
+                return ['sub' => $sub, 'id' => $file];
+            }
+        }
+    }
+    
+    return null;
+}
+
 // Mail Parsing Helpers
 function parse_headers(string $header_raw): array {
     $headers = [];
@@ -620,25 +650,25 @@ switch ($action) {
         $username = $_SESSION['username'];
         $folder = $_GET['folder'] ?? 'INBOX';
         $email_id = $_GET['id'] ?? '';
-        
+
         if (empty($email_id)) {
             respond(false, '이메일 ID가 누락되었습니다.');
         }
-        
-        $src_sub = ($folder === 'INBOX') ? 'new' : '.' . $folder . '/new';
-        $in_new = true;
-        $content = secure_read_file($username, $src_sub, $email_id);
-        
-        if ($content === null || trim($content) === 'File not found') {
-            $src_sub = ($folder === 'INBOX') ? 'cur' : '.' . $folder . '/cur';
-            $in_new = false;
-            $content = secure_read_file($username, $src_sub, $email_id);
-        }
-        
-        if ($content === null || trim($content) === 'File not found') {
+
+        $path_info = find_email_path($username, $folder, $email_id);
+        if (!$path_info) {
             respond(false, '이메일을 찾을 수 없습니다.');
         }
-        
+
+        $src_sub = $path_info['sub'];
+        $email_id = $path_info['id'];
+        $in_new = (strpos($src_sub, '/new') !== false || $src_sub === 'new');
+        $content = secure_read_file($username, $src_sub, $email_id);
+
+        if ($content === null || trim($content) === 'File not found') {
+            respond(false, '이메일을 읽을 수 없습니다.');
+        }
+
         $new_id = $email_id;
         $dest_sub = ($folder === 'INBOX') ? 'cur' : '.' . $folder . '/cur';
         $need_rename = false;
@@ -693,26 +723,13 @@ switch ($action) {
             respond(false, '이메일 ID가 누락되었습니다.');
         }
         
-        // Find which folder (new or cur) it is in
-        $sub_paths = [];
-        if ($folder === 'INBOX') {
-            $sub_paths = ['cur', 'new'];
-        } else {
-            $sub_paths = ['.' . $folder . '/cur', '.' . $folder . '/new'];
-        }
-        
-        $found_sub = null;
-        foreach ($sub_paths as $sub) {
-            $content = secure_read_file($username, $sub, $email_id);
-            if ($content !== null && trim($content) !== 'File not found') {
-                $found_sub = $sub;
-                break;
-            }
-        }
-        
-        if (!$found_sub) {
+        $path_info = find_email_path($username, $folder, $email_id);
+        if (!$path_info) {
             respond(false, '이메일을 찾을 수 없습니다.');
         }
+        
+        $found_sub = $path_info['sub'];
+        $email_id = $path_info['id'];
         
         if ($folder === 'Trash') {
             if (secure_delete_file($username, $found_sub, $email_id)) {
@@ -1282,24 +1299,20 @@ switch ($action) {
         $email_id = $_POST['id'] ?? '';
         $src_folder = $_POST['folder'] ?? 'INBOX';
         $dest_folder = $_POST['dest_folder'] ?? '';
-        
+
         if (empty($email_id) || empty($dest_folder)) {
             respond(false, '필수 인자가 누락되었습니다.');
         }
-        
-        $src_sub = ($src_folder === 'INBOX') ? 'cur' : '.' . $src_folder . '/cur';
-        $dest_sub = ($dest_folder === 'INBOX') ? 'cur' : '.' . $dest_folder . '/cur';
-        
-        $content = secure_read_file($username, $src_sub, $email_id);
-        if ($content === null || trim($content) === 'File not found') {
-            $src_sub = ($src_folder === 'INBOX') ? 'new' : '.' . $src_folder . '/new';
-            $content = secure_read_file($username, $src_sub, $email_id);
-        }
-        
-        if ($content === null || trim($content) === 'File not found') {
+
+        $path_info = find_email_path($username, $src_folder, $email_id);
+        if (!$path_info) {
             respond(false, '이메일을 찾을 수 없습니다.');
         }
-        
+
+        $src_sub = $path_info['sub'];
+        $email_id = $path_info['id'];
+        $dest_sub = ($dest_folder === 'INBOX') ? 'cur' : '.' . $dest_folder . '/cur';
+
         if (secure_move_file($username, $src_sub, $dest_sub, $email_id)) {
             respond(true, '이메일이 성공적으로 이동되었습니다.');
         } else {
@@ -1353,38 +1366,32 @@ switch ($action) {
         $username = $_SESSION['username'];
         $folder = $_POST['folder'] ?? 'INBOX';
         $email_id = $_POST['id'] ?? '';
-        
+
         if (empty($email_id)) {
             respond(false, '이메일 ID가 누락되었습니다.');
         }
-        
-        $sub_paths = ($folder === 'INBOX') ? ['cur', 'new'] : ['.' . $folder . '/cur', '.' . $folder . '/new'];
-        $found_sub = null;
-        foreach ($sub_paths as $sub) {
-            $content = secure_read_file($username, $sub, $email_id);
-            if ($content !== null && trim($content) !== 'File not found') {
-                $found_sub = $sub;
-                break;
-            }
-        }
-        
-        if (!$found_sub) {
+
+        $path_info = find_email_path($username, $folder, $email_id);
+        if (!$path_info) {
             respond(false, '이메일을 찾을 수 없습니다.');
         }
-        
+
+        $found_sub = $path_info['sub'];
+        $email_id = $path_info['id'];
+
         $parts = explode(':2,', $email_id);
         $base_name = $parts[0];
         $flags = $parts[1] ?? '';
-        
+
         $is_flagged = (strpos($flags, 'F') !== false);
         if ($is_flagged) {
             $new_flags = str_replace('F', '', $flags);
         } else {
             $new_flags = $flags . 'F';
         }
-        
+
         $new_id = $base_name . ':2,' . $new_flags;
-        
+
         if (secure_move_file($username, $found_sub, $found_sub, $email_id, $new_id)) {
             respond(true, '성공', ['new_id' => $new_id, 'flagged' => !$is_flagged]);
         } else {

@@ -23,7 +23,7 @@
             <div class="sidebar-header">
                 <div class="logo">
                     <img src="onto.png" alt="OnTo" class="logo-image">
-                    <span class="logo-text">OnTo</span>
+                    <span class="logo-text">OnTo Webmail</span>
                 </div>
             </div>
 
@@ -181,8 +181,7 @@
     <div id="auth-modal" class="auth-overlay hidden">
         <div class="auth-card">
             <div class="auth-header">
-                <h2>ONTO</h2>
-                <p>Webmail</p>
+                <h2>OnTo Webmail</h2>
             </div>
             <div class="auth-tabs">
                 <button id="tab-login" class="auth-tab active">로그인</button>
@@ -324,16 +323,21 @@
                                 <th>아이디</th>
                                 <th>이름</th>
                                 <th>
-                                    <div class="header-filter-wrapper" style="display: inline-flex; align-items: center; gap: 6px; justify-content: center; width: 100%;">
-                                        <select id="admin-group-filter" class="table-header-filter">
-                                            <option value="all">전체</option>
-                                        </select>
+                                    <div class="header-filter-wrapper">
+                                        <div id="header-group-filter-dropdown" class="multi-group-dropdown header-filter-dropdown">
+                                            <button class="btn-multi-group-trigger" type="button" id="btn-header-filter-trigger">
+                                                <span>전체</span> <i class="fa-solid fa-caret-down"></i>
+                                            </button>
+                                            <div id="header-group-filter-options" class="multi-group-options hidden">
+                                                <!-- Dynamic -->
+                                            </div>
+                                        </div>
                                     </div>
                                 </th>
                                 <th>신청일</th>
                                 <th>상태</th>
-                                <th>작업</th>
-                            </tr>
+                                <th></th>
+                                </tr>
                         </thead>
                         <tbody id="admin-user-list">
                             <!-- Dynamic rendering -->

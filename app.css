@@ -22,6 +22,7 @@
     --text-muted: #6b7280;
     
     --color-primary: #8b5cf6;       /* Violet */
+    --color-primary-rgb: 139, 92, 246;
     --color-primary-glow: rgba(139, 92, 246, 0.15);
     --color-secondary: #ec4899;     /* Pink */
     
@@ -186,7 +187,7 @@ body {
 .nav-item {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 8px;
     padding: 12px 16px;
     color: var(--text-secondary);
     text-decoration: none;
@@ -1599,7 +1600,7 @@ body {
 .tag-item {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 8px;
     padding: 10px 16px;
     color: var(--text-secondary);
     text-decoration: none;
@@ -2139,17 +2140,51 @@ body.theme-white .btn-close-modal:hover {
 .group-checklist-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: pointer;
     font-size: 13px;
     color: var(--text-primary);
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
     user-select: none;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+}
+.group-checklist-item:hover {
+    background: rgba(var(--color-primary-rgb), 0.08);
+    border-color: rgba(var(--color-primary-rgb), 0.2);
 }
 .group-checklist-item input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
     cursor: pointer;
-    width: 15px;
-    height: 15px;
-    accent-color: var(--color-primary);
+    position: relative;
+    transition: all var(--transition-fast);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.group-checklist-item input[type="checkbox"]:checked {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+.group-checklist-item input[type="checkbox"]::after {
+    content: "\f00c";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 10px;
+    color: white;
+    display: none;
+}
+.group-checklist-item input[type="checkbox"]:checked::after {
+    display: block;
 }
 
 .multi-group-dropdown {
@@ -2205,23 +2240,63 @@ body.theme-white .btn-close-modal:hover {
 .multi-group-option-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-secondary);
-    padding: 4px 6px;
+    padding: 6px 8px;
     border-radius: var(--radius-sm);
-    transition: background var(--transition-fast);
+    transition: all var(--transition-fast);
+    user-select: none;
 }
 .multi-group-option-label:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(var(--color-primary-rgb, 99, 102, 241), 0.1);
     color: var(--text-primary);
 }
 .multi-group-option-label input[type="checkbox"] {
-    width: 14px;
-    height: 14px;
-    accent-color: var(--color-primary);
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
     cursor: pointer;
+    position: relative;
+    transition: all var(--transition-fast);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.multi-group-option-label input[type="checkbox"]:checked {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+.multi-group-option-label input[type="checkbox"]:indeterminate {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+.multi-group-option-label input[type="checkbox"]::after {
+    content: "\f00c";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 10px;
+    color: white;
+    display: none;
+}
+.multi-group-option-label input[type="checkbox"]:checked::after {
+    display: block;
+}
+.multi-group-option-label input[type="checkbox"]:indeterminate::after {
+    content: "\f068";
+    display: block;
+}
+.filter-all-label {
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+    font-weight: 600;
 }
 
 /* Select element wrapper for Admin Add user */
@@ -2442,6 +2517,16 @@ body.theme-white .btn-close-modal:hover {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mail-list-pane.resizing {
+    transition: none !important;
+}
+
+/* 드래그 중 iframe 간섭 방지 */
+.app-container.resizing iframe {
+    pointer-events: none !important;
 }
 
 /* 메일 리더 패널: 나머지 공간 */
@@ -3408,15 +3493,21 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .nav-item > i:first-child,
-.tag-item > i:first-child,
-.sidebar.collapsed .nav-item i {
+.tag-item > i:first-child {
     font-size: 18px !important;
-    width: 44px !important;
+    width: 44px !important; /* 원상복구: 아이콘 위치 고정 */
     height: 44px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     margin: 0 !important;
+    margin-right: -10px !important; /* 텍스트만 아이콘 쪽으로 당겨서 간격을 줄임 */
+}
+
+.sidebar.collapsed .nav-item i,
+.sidebar.collapsed .tag-item i {
+    width: 44px !important;
+    margin-right: 0 !important; /* 접혔을 때는 여백 제거 */
 }
 
 .btn-icon-footer i,

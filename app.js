@@ -595,7 +595,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isSameFolder = (state.currentFolder === folder);
         state.currentFolder = folder;
         syncActiveFolderUI();
-        folderTitle.innerHTML = `<span style="margin-right:8px; opacity:0.8;">${getFolderIcon(folder)}</span>${getFolderDisplayName(folder)}`;
+        folderTitle.innerHTML = `<span style="margin-right:16px; opacity:0.8;">${getFolderIcon(folder)}</span>${getFolderDisplayName(folder)}`;
 
         // Apply global saved height
         const globalSavedHeight = getCookie('listHeight');
@@ -1124,6 +1124,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await apiRequest('read_email', 'GET', { folder: actualFolder, id });
         if (res.success && res.email) {
             const email = res.email;
+
+            // If the ID has changed (e.g., marked as seen and renamed), update it in the DOM
+            if (email.id !== id) {
+                const tr = document.querySelector(`.mail-item[data-id="${id}"]`);
+                if (tr) {
+                    tr.dataset.id = email.id;
+                    const chk = tr.querySelector('.mail-item-chk');
+                    if (chk) chk.dataset.id = email.id;
+                    const star = tr.querySelector('.star-btn');
+                    if (star) star.dataset.id = email.id;
+                }
+                if (state.selectedEmailId === id) state.selectedEmailId = email.id;
+                const emailInState = state.emails.find(e => e.id === id);
+                if (emailInState) emailInState.id = email.id;
+            }
+
             readSubject.innerHTML = `<i class="fa-regular fa-envelope" style="margin-right: 12px; opacity: 0.5; font-size: 0.9em;"></i>${escapeHtml(email.subject)}`;
             readFrom.textContent = email.from;
             readTo.textContent = email.to;
@@ -1401,8 +1417,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let allAdminUsers = []; // Cache list for client-side filtering
     let adminGroupsList = [];
 
-    async function loadAdminUsers() {
-        adminUserList.innerHTML = '<tr><td colspan="6" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 회원 목록 불러오는 중...</td></tr>';
+    async function loadAdminUsers(refreshOnly = false) {
+        if (!refreshOnly) {
+            adminUserList.innerHTML = '<tr><td colspan="6" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 회원 목록 불러오는 중...</td></tr>';
+        }
         
         const groupsRes = await apiRequest('admin_list_groups');
         adminGroupsList = groupsRes.success ? (groupsRes.groups || []) : [];
@@ -1411,23 +1429,103 @@ document.addEventListener('DOMContentLoaded', () => {
         if (res.success) {
             allAdminUsers = res.users || [];
             
-            // Build Group Filter Dropdown options
-            const filterSelect = document.getElementById('admin-group-filter');
-            if (filterSelect) {
-                // Keep "전체" option, rebuild others
-                filterSelect.innerHTML = '<option value="all">전체</option>';
-                adminGroupsList.forEach(g => {
-                    const opt = document.createElement('option');
-                    opt.value = g.name;
-                    opt.textContent = g.name;
-                    filterSelect.appendChild(opt);
-                });
+            // Build Group Filter Dropdown options (Multi-select)
+            const filterOptions = document.getElementById('header-group-filter-options');
+            const filterTrigger = document.getElementById('btn-header-filter-trigger');
+            
+            if (filterOptions && filterTrigger) {
+                // If it's just a refresh, we might not want to rebuild the entire filter UI 
+                // but for now keeping it simple.
+                filterOptions.innerHTML = '';
                 
-                // Remove previous listener to avoid double binding
-                filterSelect.onchange = (e) => {
-                    renderAdminUsersTable(e.target.value);
+                // Add "전체" checkbox (special behavior)
+                const allLabel = document.createElement('label');
+                allLabel.className = 'multi-group-option-label filter-all-label';
+                allLabel.innerHTML = `
+                    <input type="checkbox" id="chk-filter-all" value="all" checked>
+                    <span>전체</span>
+                `;
+                filterOptions.appendChild(allLabel);
+
+                adminGroupsList.forEach(g => {
+                    const label = document.createElement('label');
+                    label.className = 'multi-group-option-label';
+                    label.innerHTML = `
+                        <input type="checkbox" class="chk-filter-group-item" value="${escapeHtml(g.name)}" checked>
+                        <span>${escapeHtml(g.name)}</span>
+                    `;
+                    filterOptions.appendChild(label);
+                });
+
+                // Toggle visibility
+                filterTrigger.onclick = (e) => {
+                    e.stopPropagation();
+                    // Close other dropdowns
+                    document.querySelectorAll('.multi-group-options').forEach(opt => {
+                        if (opt !== filterOptions) opt.classList.add('hidden');
+                    });
+                    
+                    filterOptions.classList.toggle('hidden');
+                    if (!filterOptions.classList.contains('hidden')) {
+                        const rect = filterTrigger.getBoundingClientRect();
+                        filterOptions.style.position = 'fixed';
+                        filterOptions.style.left = `${rect.left}px`;
+                        filterOptions.style.top = `${rect.bottom + 4}px`;
+                        filterOptions.style.width = `${rect.width}px`;
+                        filterOptions.style.minWidth = '140px';
+                    }
                 };
-                filterSelect.value = 'all';
+
+                // Filter Change Events
+                const chkAll = document.getElementById('chk-filter-all');
+                const chkItems = filterOptions.querySelectorAll('.chk-filter-group-item');
+
+                chkAll.onchange = () => {
+                    chkItems.forEach(c => c.checked = chkAll.checked);
+                    updateFilterTriggerText();
+                    renderAdminUsersTable(getSelectedFilterGroups());
+                };
+
+                chkItems.forEach(chk => {
+                    chk.onchange = () => {
+                        const allChecked = Array.from(chkItems).every(c => c.checked);
+                        const noneChecked = Array.from(chkItems).every(c => !c.checked);
+                        
+                        if (allChecked) {
+                            chkAll.checked = true;
+                            chkAll.indeterminate = false;
+                        } else if (noneChecked) {
+                            chkAll.checked = false;
+                            chkAll.indeterminate = false;
+                        } else {
+                            chkAll.checked = false;
+                            chkAll.indeterminate = true;
+                        }
+                        
+                        updateFilterTriggerText();
+                        renderAdminUsersTable(getSelectedFilterGroups());
+                    };
+                });
+
+                function getSelectedFilterGroups() {
+                    if (chkAll.checked) return 'all';
+                    const selected = Array.from(chkItems).filter(c => c.checked).map(c => c.value);
+                    if (selected.length === 0) return []; // None selected
+                    return selected;
+                }
+
+                function updateFilterTriggerText() {
+                    const selectedCount = Array.from(chkItems).filter(c => c.checked).length;
+                    if (chkAll.checked || selectedCount === adminGroupsList.length) {
+                        filterTrigger.querySelector('span').textContent = '전체';
+                    } else if (selectedCount === 0) {
+                        filterTrigger.querySelector('span').textContent = '없음';
+                    } else if (selectedCount === 1) {
+                        filterTrigger.querySelector('span').textContent = Array.from(chkItems).find(c => c.checked).value;
+                    } else {
+                        filterTrigger.querySelector('span').textContent = `그룹 (${selectedCount})`;
+                    }
+                }
             }
 
             renderAdminUsersTable('all');
@@ -1436,12 +1534,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderAdminUsersTable(groupFilter = 'all') {
+    function renderAdminUsersTable(groupFilter = 'all', highlightId = null) {
         adminUserList.innerHTML = '';
         
         const filteredUsers = allAdminUsers.filter(user => {
             if (groupFilter === 'all') return true;
+            if (Array.isArray(groupFilter) && groupFilter.length === 0) return false;
+            
             const uGroups = (user.group_name || '일반').split(',').map(s => s.trim());
+            
+            if (Array.isArray(groupFilter)) {
+                // Return true if the user belongs to ANY of the selected filter groups
+                return uGroups.some(g => groupFilter.includes(g));
+            }
+            
             return uGroups.includes(groupFilter);
         });
 
@@ -1452,6 +1558,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         filteredUsers.forEach(user => {
             const tr = document.createElement('tr');
+            if (highlightId && user.id == highlightId) {
+                tr.classList.add('new-row-highlight');
+            }
             
             let statusBadge = '';
             let actionButtons = '';
@@ -1469,9 +1578,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${user.username !== 'dj' ? `<button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>` : ''}
                 `;
             } else if (user.status === 'locked') {
-                statusBadge = '<span class="status-badge locked">잠금 상태</span>';
+                statusBadge = '<span class="status-badge locked">잠금</span>';
                 actionButtons = `
-                    <button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-lock-open"></i> 잠금해제</button>
+                    <button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-lock-open"></i> 해제</button>
                     <button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>
                 `;
             }
@@ -1575,11 +1684,11 @@ document.addEventListener('DOMContentLoaded', () => {
         adminUserList.querySelectorAll('.btn-admin-action.approve').forEach(btn => {
             btn.onclick = async () => {
                 const id = btn.dataset.id;
-                const act = btn.textContent.includes('잠금해제') ? 'admin_unlock' : 'admin_approve';
+                const act = btn.textContent.includes('해제') ? 'admin_unlock' : 'admin_approve';
                 showToast('처리 중...');
                 const r = await apiRequest(act, 'POST', { id });
                 showToast(r.message);
-                if (r.success) loadAdminUsers();
+                if (r.success) loadAdminUsers(true);
             };
         });
 
@@ -1589,7 +1698,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('처리 중...');
                 const r = await apiRequest('admin_lock', 'POST', { id });
                 showToast(r.message);
-                if (r.success) loadAdminUsers();
+                if (r.success) loadAdminUsers(true);
             };
         });
 
@@ -1600,7 +1709,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('삭제 중...');
                 const r = await apiRequest('admin_delete', 'POST', { id });
                 showToast(r.message);
-                if (r.success) loadAdminUsers();
+                if (r.success) loadAdminUsers(true);
             };
         });
     }
@@ -1820,9 +1929,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setupClickOutside(tagCreateModal);
 
-    async function loadTagsModalList() {
+    async function loadTagsModalList(refreshOnly = false) {
         if (!tagsModalList) return;
-        tagsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
+        if (!refreshOnly) {
+            tagsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
+        }
         
         const res = await apiRequest('list_tags');
         if (res.success) {
@@ -1856,7 +1967,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const r = await apiRequest('delete_tag', 'POST', { tag_name: tName });
                     showToast(r.message);
                     if (r.success) {
-                        loadTagsModalList();
+                        loadTagsModalList(true);
                         loadTags();
                         if (state.currentFolder === tName) {
                             setCookie('currentFolder', 'INBOX');
@@ -1900,7 +2011,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await apiRequest('set_folder_color', 'POST', { folder_name: tagName, color: color });
                 if (res.success) {
                     state.tagColors[tagName] = color;
-                    loadTagsModalList();
+                    loadTagsModalList(true);
                     loadTags();
                     tagColorPopover.classList.add('hidden');
                 }
@@ -1932,7 +2043,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.success) {
                 newTagNameInput.value = '';
                 tagCreateModal.classList.add('hidden');
-                loadTagsModalList();
+                loadTagsModalList(true);
                 loadTags();
             }
         });
@@ -2232,7 +2343,9 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         document.body.style.cursor = 'row-resize';
         document.body.classList.add('resizing');
+        document.getElementById('app').classList.add('resizing');
         resizerList.classList.add('dragging');
+        mailListPane.classList.add('resizing');
         
         const mainContent = document.getElementById('main-content');
         const mainContentRect = mainContent.getBoundingClientRect();
@@ -2262,7 +2375,9 @@ document.addEventListener('DOMContentLoaded', () => {
         function onMouseUp() {
             document.body.style.cursor = '';
             document.body.classList.remove('resizing');
+            document.getElementById('app').classList.remove('resizing');
             resizerList.classList.remove('dragging');
+            mailListPane.classList.remove('resizing');
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
             setCookie('listHeight', listHeight);
@@ -2341,7 +2456,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (res.success) {
             formAdminCreateUser.reset();
             adminCreateUserModal.classList.add('hidden');
-            loadAdminUsers();
+            loadAdminUsers(true);
         }
     });
 
@@ -2370,9 +2485,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function loadGroupsModalList() {
+    async function loadGroupsModalList(refreshOnly = false) {
         if (!groupsModalList) return;
-        groupsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
+        if (!refreshOnly) {
+            groupsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
+        }
 
         const res = await apiRequest('admin_list_groups');
         if (res.success) {
@@ -2402,7 +2519,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     showToast('그룹 일괄 잠금 중...');
                     const r = await apiRequest('admin_lock_group', 'POST', { name: gName });
                     showToast(r.message);
-                    loadAdminUsers();
+                    loadAdminUsers(true);
                 });
 
                 tr.querySelector('.btn-group-unlock').addEventListener('click', async (evt) => {
@@ -2411,19 +2528,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     showToast('그룹 일괄 잠금 해제 중...');
                     const r = await apiRequest('admin_unlock_group', 'POST', { name: gName });
                     showToast(r.message);
-                    loadAdminUsers();
+                    loadAdminUsers(true);
                 });
 
                 if (!isDefaultGroup) {
                     tr.querySelector('.btn-group-delete').addEventListener('click', async (evt) => {
-                        const gName = evt.target.closest('tr').dataset.group;
-                        if (!await customConfirm(`'${gName}' 그룹을 삭제하시겠습니까?\n소속 회원은 모두 '일반' 그룹으로 변경됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
+                        const gName = evt.currentTarget.dataset.group;
+                        if (!await customConfirm(`'${gName}' 그룹을 삭제하시겠습니까?\n해당 그룹에 속한 사용자들의 그룹 정보가 업데이트됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
                         showToast('그룹 삭제 중...');
                         const r = await apiRequest('admin_delete_group', 'POST', { name: gName });
                         showToast(r.message);
                         if (r.success) {
-                            loadGroupsModalList();
-                            loadAdminUsers();
+                            loadGroupsModalList(true);
+                            loadAdminUsers(true);
                         }
                     });
                 }
@@ -2451,7 +2568,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(res.message);
             if (res.success) {
                 newGroupNameInput.value = '';
-                loadGroupsModalList();
+                loadGroupsModalList(true);
             }
         });
     }
