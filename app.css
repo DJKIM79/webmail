@@ -1600,14 +1600,14 @@ body {
 }
 
 .arrow-icon {
-    font-size: 12px;
+    font-size: 12px !important;
     color: var(--text-secondary);
     transition: transform var(--transition-normal);
     margin-right: 16px;
 }
 
 .arrow-icon.rotated {
-    transform: rotate(180deg);
+    transform: rotate(-180deg);
 }
 
 .sidebar-tags {

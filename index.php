@@ -60,7 +60,7 @@
                         <i class="fa-solid fa-box-archive"></i>
                         <span class="nav-label">개인 보관함</span>
                         <button id="btn-manage-tags" class="btn-manage-tags-inline" title="보관함 관리"><i class="fa-solid fa-gear"></i></button>
-                        <i class="fa-solid fa-chevron-down arrow-icon" id="tags-menu-arrow"></i>
+                        <i class="fa-solid fa-caret-down arrow-icon" id="tags-menu-arrow"></i>
                     </div>
                     
                     <!-- 접힌 상태에서 개인 보관함 클릭시 뜨는 풍선도움말 팝오버 -->
