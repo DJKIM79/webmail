@@ -606,6 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnEmptyTrash) {
             if (folder === 'Trash') {
                 btnEmptyTrash.classList.remove('hidden');
+                btnEmptyTrash.disabled = true;
             } else {
                 btnEmptyTrash.classList.add('hidden');
             }
@@ -623,6 +624,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isSameFolder && state.folderCache[folder]) {
             state.emails = state.folderCache[folder];
             renderMailList();
+            
+            if (folder === 'Trash' && btnEmptyTrash) {
+                btnEmptyTrash.disabled = (state.emails.length === 0);
+            }
+
             // Don't show full loading overlay if we have cached content to show
             showLoading = false;
         }
@@ -639,7 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await apiRequest('list_emails', 'GET', { folder });
         
         const elapsed = Date.now() - startTime;
-        const minDuration = (isSameFolder || state.folderCache[folder]) ? 300 : 1000;
+        const minDuration = 800; // Matches CSS animation duration for a full 180deg cycle
         const delay = Math.max(0, minDuration - elapsed);
         
         setTimeout(() => {
@@ -652,6 +658,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const nextEmails = res.emails || [];
             state.folderCache[folder] = nextEmails; // Update cache
             
+            if (folder === 'Trash' && btnEmptyTrash) {
+                btnEmptyTrash.disabled = (nextEmails.length === 0);
+            }
+
             const tbody = mailContainer.querySelector('#mail-list-tbody');
             
             // If we're still on the same folder we requested, update UI
@@ -707,7 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             tr.addEventListener('contextmenu', (e) => {
                                 e.preventDefault();
-                                selectEmail(email.id);
+                                highlightEmail(email.id);
                                 showMailContextMenu(e, email.id);
                             });
 
@@ -901,7 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             tr.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                selectEmail(email.id);
+                highlightEmail(email.id);
                 showMailContextMenu(e, email.id);
             });
             
@@ -1052,10 +1062,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function highlightEmail(id) {
+        state.selectedEmailId = id;
+        const targetBase = getBaseId(id);
+
+        document.querySelectorAll('.mail-item').forEach(el => {
+            if (getBaseId(el.dataset.id) === targetBase) {
+                el.classList.add('selected');
+            } else {
+                el.classList.remove('selected');
+            }
+        });
+    }
+
     async function selectEmail(id) {
         state.selectedEmailId = id;
         const targetBase = getBaseId(id);
-        
+
         document.querySelectorAll('.mail-item').forEach(el => {
             if (getBaseId(el.dataset.id) === targetBase) {
                 el.classList.add('selected');
@@ -1429,127 +1452,172 @@ document.addEventListener('DOMContentLoaded', () => {
         if (res.success) {
             allAdminUsers = res.users || [];
             
-            // Build Group Filter Dropdown options (Multi-select)
-            const filterOptions = document.getElementById('header-group-filter-options');
-            const filterTrigger = document.getElementById('btn-header-filter-trigger');
+            // Build Group Filter Dropdown
+            const groupFilterOptions = document.getElementById('header-group-filter-options');
+            const groupFilterTrigger = document.getElementById('btn-header-filter-trigger');
             
-            if (filterOptions && filterTrigger) {
-                // If it's just a refresh, we might not want to rebuild the entire filter UI 
-                // but for now keeping it simple.
-                filterOptions.innerHTML = '';
-                
-                // Add "전체" checkbox (special behavior)
+            if (groupFilterOptions && groupFilterTrigger) {
+                groupFilterOptions.innerHTML = '';
                 const allLabel = document.createElement('label');
                 allLabel.className = 'multi-group-option-label filter-all-label';
-                allLabel.innerHTML = `
-                    <input type="checkbox" id="chk-filter-all" value="all" checked>
-                    <span>전체</span>
-                `;
-                filterOptions.appendChild(allLabel);
+                allLabel.innerHTML = `<input type="checkbox" id="chk-filter-all" value="all" checked><span>전체</span>`;
+                groupFilterOptions.appendChild(allLabel);
 
                 adminGroupsList.forEach(g => {
                     const label = document.createElement('label');
                     label.className = 'multi-group-option-label';
-                    label.innerHTML = `
-                        <input type="checkbox" class="chk-filter-group-item" value="${escapeHtml(g.name)}" checked>
-                        <span>${escapeHtml(g.name)}</span>
-                    `;
-                    filterOptions.appendChild(label);
+                    label.innerHTML = `<input type="checkbox" class="chk-filter-group-item" value="${escapeHtml(g.name)}" checked><span>${escapeHtml(g.name)}</span>`;
+                    groupFilterOptions.appendChild(label);
                 });
 
-                // Toggle visibility
-                filterTrigger.onclick = (e) => {
+                groupFilterTrigger.onclick = (e) => {
                     e.stopPropagation();
-                    // Close other dropdowns
-                    document.querySelectorAll('.multi-group-options').forEach(opt => {
-                        if (opt !== filterOptions) opt.classList.add('hidden');
-                    });
-                    
-                    filterOptions.classList.toggle('hidden');
-                    if (!filterOptions.classList.contains('hidden')) {
-                        const rect = filterTrigger.getBoundingClientRect();
-                        filterOptions.style.position = 'fixed';
-                        filterOptions.style.left = `${rect.left}px`;
-                        filterOptions.style.top = `${rect.bottom + 4}px`;
-                        filterOptions.style.width = `${rect.width}px`;
-                        filterOptions.style.minWidth = '140px';
-                    }
+                    document.querySelectorAll('.multi-group-options').forEach(opt => { if (opt !== groupFilterOptions) opt.classList.add('hidden'); });
+                    groupFilterOptions.classList.toggle('hidden');
+                    if (!groupFilterOptions.classList.contains('hidden')) positionDropdown(groupFilterTrigger, groupFilterOptions);
                 };
 
-                // Filter Change Events
                 const chkAll = document.getElementById('chk-filter-all');
-                const chkItems = filterOptions.querySelectorAll('.chk-filter-group-item');
-
-                chkAll.onchange = () => {
-                    chkItems.forEach(c => c.checked = chkAll.checked);
-                    updateFilterTriggerText();
-                    renderAdminUsersTable(getSelectedFilterGroups());
-                };
-
-                chkItems.forEach(chk => {
-                    chk.onchange = () => {
-                        const allChecked = Array.from(chkItems).every(c => c.checked);
-                        const noneChecked = Array.from(chkItems).every(c => !c.checked);
-                        
-                        if (allChecked) {
-                            chkAll.checked = true;
-                            chkAll.indeterminate = false;
-                        } else if (noneChecked) {
-                            chkAll.checked = false;
-                            chkAll.indeterminate = false;
-                        } else {
-                            chkAll.checked = false;
-                            chkAll.indeterminate = true;
-                        }
-                        
-                        updateFilterTriggerText();
-                        renderAdminUsersTable(getSelectedFilterGroups());
-                    };
-                });
-
-                function getSelectedFilterGroups() {
-                    if (chkAll.checked) return 'all';
-                    const selected = Array.from(chkItems).filter(c => c.checked).map(c => c.value);
-                    if (selected.length === 0) return []; // None selected
-                    return selected;
-                }
-
-                function updateFilterTriggerText() {
-                    const selectedCount = Array.from(chkItems).filter(c => c.checked).length;
-                    if (chkAll.checked || selectedCount === adminGroupsList.length) {
-                        filterTrigger.querySelector('span').textContent = '전체';
-                    } else if (selectedCount === 0) {
-                        filterTrigger.querySelector('span').textContent = '없음';
-                    } else if (selectedCount === 1) {
-                        filterTrigger.querySelector('span').textContent = Array.from(chkItems).find(c => c.checked).value;
-                    } else {
-                        filterTrigger.querySelector('span').textContent = `그룹 (${selectedCount})`;
-                    }
-                }
+                const chkItems = groupFilterOptions.querySelectorAll('.chk-filter-group-item');
+                chkAll.onchange = () => { chkItems.forEach(c => c.checked = chkAll.checked); updateFilterUI(); };
+                chkItems.forEach(chk => { chk.onchange = () => {
+                    const allChecked = Array.from(chkItems).every(c => c.checked);
+                    const noneChecked = Array.from(chkItems).every(c => !c.checked);
+                    chkAll.checked = allChecked; chkAll.indeterminate = !allChecked && !noneChecked;
+                    updateFilterUI();
+                }; });
             }
 
-            renderAdminUsersTable('all');
+            // Build Status Filter Dropdown
+            const statusFilterOptions = document.getElementById('header-status-filter-options');
+            const statusFilterTrigger = document.getElementById('btn-header-status-filter-trigger');
+            if (statusFilterOptions && statusFilterTrigger) {
+                statusFilterTrigger.onclick = (e) => {
+                    e.stopPropagation();
+                    document.querySelectorAll('.multi-group-options').forEach(opt => { if (opt !== statusFilterOptions) opt.classList.add('hidden'); });
+                    statusFilterOptions.classList.toggle('hidden');
+                    if (!statusFilterOptions.classList.contains('hidden')) positionDropdown(statusFilterTrigger, statusFilterOptions);
+                };
+                const chkStatusAll = document.getElementById('chk-filter-status-all');
+                const chkStatusItems = statusFilterOptions.querySelectorAll('.chk-filter-status-item');
+                chkStatusAll.onchange = () => { chkStatusItems.forEach(c => c.checked = chkStatusAll.checked); updateFilterUI(); };
+                chkStatusItems.forEach(chk => { chk.onchange = () => {
+                    const allChecked = Array.from(chkStatusItems).every(c => c.checked);
+                    const noneChecked = Array.from(chkStatusItems).every(c => !c.checked);
+                    chkStatusAll.checked = allChecked; chkStatusAll.indeterminate = !allChecked && !noneChecked;
+                    updateFilterUI();
+                }; });
+            }
+
+            function positionDropdown(trigger, options) {
+                const rect = trigger.getBoundingClientRect();
+                options.style.position = 'fixed';
+                options.style.left = `${rect.left}px`;
+                options.style.top = `${rect.bottom + 4}px`;
+                options.style.width = 'auto';
+                options.style.minWidth = `${rect.width}px`;
+                options.style.maxWidth = '300px';
+                
+                // Adjustment for right-side overflow
+                setTimeout(() => {
+                    const optionsRect = options.getBoundingClientRect();
+                    if (optionsRect.right > window.innerWidth - 20) {
+                        options.style.left = 'auto';
+                        options.style.right = `${window.innerWidth - rect.right}px`;
+                    }
+                }, 0);
+            }
+
+            function updateFilterUI() {
+                const groupTriggerSpan = groupFilterTrigger.querySelector('span');
+                const groupItems = groupFilterOptions.querySelectorAll('.chk-filter-group-item');
+                const selGroups = Array.from(groupItems).filter(c => c.checked).length;
+                if (document.getElementById('chk-filter-all').checked || selGroups === adminGroupsList.length) groupTriggerSpan.textContent = '그룹';
+                else if (selGroups === 0) groupTriggerSpan.textContent = '그룹 (0)';
+                else groupTriggerSpan.textContent = selGroups === 1 ? Array.from(groupItems).find(c => c.checked).value : `그룹 (${selGroups})`;
+
+                const statusTriggerSpan = statusFilterTrigger.querySelector('span');
+                const statusItems = statusFilterOptions.querySelectorAll('.chk-filter-status-item');
+                const selStatus = Array.from(statusItems).filter(c => c.checked).length;
+                if (document.getElementById('chk-filter-status-all').checked || selStatus === 3) statusTriggerSpan.textContent = '상태';
+                else if (selStatus === 0) statusTriggerSpan.textContent = '상태 (0)';
+                else statusTriggerSpan.textContent = selStatus === 1 ? getStatusLabel(Array.from(statusItems).find(c => c.checked).value) : `상태 (${selStatus})`;
+
+                renderAdminUsersTable();
+            }
+
+            function getStatusLabel(s) {
+                if (s === 'pending') return '승인 요청';
+                if (s === 'approved') return '활성화';
+                if (s === 'locked') return '잠금 중';
+                return s;
+            }
+
+            // Setup sorting
+            const headers = document.querySelectorAll('.admin-table th.sortable');
+            headers.forEach(h => {
+                h.onclick = () => {
+                    const sortKey = h.dataset.sort;
+                    if (state.adminSortKey === sortKey) {
+                        state.adminSortOrder = state.adminSortOrder === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        state.adminSortKey = sortKey;
+                        state.adminSortOrder = 'asc';
+                    }
+                    headers.forEach(th => th.classList.remove('active'));
+                    h.classList.add('active');
+                    const icon = h.querySelector('i');
+                    headers.forEach(th => { const i = th.querySelector('i'); if (i) i.className = 'fa-solid fa-sort'; });
+                    icon.className = state.adminSortOrder === 'asc' ? 'fa-solid fa-sort-up' : 'fa-solid fa-sort-down';
+                    renderAdminUsersTable();
+                };
+            });
+
+            updateFilterUI();
         } else {
             showToast(res.message);
         }
     }
 
-    function renderAdminUsersTable(groupFilter = 'all', highlightId = null) {
+    function renderAdminUsersTable(highlightId = null) {
         adminUserList.innerHTML = '';
         
-        const filteredUsers = allAdminUsers.filter(user => {
-            if (groupFilter === 'all') return true;
-            if (Array.isArray(groupFilter) && groupFilter.length === 0) return false;
-            
-            const uGroups = (user.group_name || '일반').split(',').map(s => s.trim());
-            
-            if (Array.isArray(groupFilter)) {
-                // Return true if the user belongs to ANY of the selected filter groups
-                return uGroups.some(g => groupFilter.includes(g));
+        const groupItems = document.querySelectorAll('.chk-filter-group-item');
+        const chkAllGroup = document.getElementById('chk-filter-all');
+        const selectedGroups = chkAllGroup.checked ? 'all' : Array.from(groupItems).filter(c => c.checked).map(c => c.value);
+
+        const statusItems = document.querySelectorAll('.chk-filter-status-item');
+        const chkAllStatus = document.getElementById('chk-filter-status-all');
+        const selectedStatus = chkAllStatus.checked ? 'all' : Array.from(statusItems).filter(c => c.checked).map(c => c.value);
+
+        let filteredUsers = allAdminUsers.filter(user => {
+            // Group Filter
+            let groupMatch = selectedGroups === 'all';
+            if (!groupMatch) {
+                const uGroups = (user.group_name || '기본').split(',').map(s => s.trim());
+                groupMatch = uGroups.some(g => selectedGroups.includes(g));
             }
-            
-            return uGroups.includes(groupFilter);
+            // Status Filter
+            let statusMatch = selectedStatus === 'all';
+            if (!statusMatch) {
+                statusMatch = selectedStatus.includes(user.status);
+            }
+            return groupMatch && statusMatch;
         });
+
+        // Apply Sorting
+        if (state.adminSortKey) {
+            filteredUsers.sort((a, b) => {
+                let valA = a[state.adminSortKey] || '';
+                let valB = b[state.adminSortKey] || '';
+                if (typeof valA === 'string') valA = valA.toLowerCase();
+                if (typeof valB === 'string') valB = valB.toLowerCase();
+                
+                if (valA < valB) return state.adminSortOrder === 'asc' ? -1 : 1;
+                if (valA > valB) return state.adminSortOrder === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
 
         if (filteredUsers.length === 0) {
             adminUserList.innerHTML = '<tr><td colspan="6" style="text-align: center;">조건에 맞는 회원이 존재하지 않습니다.</td></tr>';
@@ -1558,93 +1626,83 @@ document.addEventListener('DOMContentLoaded', () => {
 
         filteredUsers.forEach(user => {
             const tr = document.createElement('tr');
-            if (highlightId && user.id == highlightId) {
-                tr.classList.add('new-row-highlight');
-            }
+            if (highlightId && user.id == highlightId) tr.classList.add('new-row-highlight');
             
             let statusBadge = '';
             let actionButtons = '';
-
             if (user.status === 'pending') {
-                statusBadge = '<span class="status-badge pending">승인 대기</span>';
-                actionButtons = `
-                    <button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-check"></i> 승인</button>
-                    <button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-xmark"></i> 거절/삭제</button>
-                `;
+                statusBadge = '<span class="status-badge pending">승인 요청</span>';
+                actionButtons = `<button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-check"></i> 승인</button>
+                                 <button class="btn-admin-action reject" data-id="${user.id}"><i class="fa-solid fa-xmark"></i> 거절</button>`;
             } else if (user.status === 'approved') {
                 statusBadge = '<span class="status-badge approved">활성화</span>';
-                actionButtons = `
-                    <button class="btn-admin-action lock" data-id="${user.id}"><i class="fa-solid fa-lock"></i> 잠금</button>
-                    ${user.username !== 'dj' ? `<button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>` : ''}
-                `;
+                actionButtons = `<button class="btn-admin-action lock" data-id="${user.id}"><i class="fa-solid fa-lock"></i> 잠금</button>
+                                 ${user.username !== 'dj' ? `<button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>` : ''}`;
             } else if (user.status === 'locked') {
-                statusBadge = '<span class="status-badge locked">잠금</span>';
-                actionButtons = `
-                    <button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-lock-open"></i> 해제</button>
-                    <button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>
-                `;
+                statusBadge = '<span class="status-badge locked">잠금 중</span>';
+                actionButtons = `<button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-lock-open"></i> 해제</button>
+                                 <button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>`;
+            } else if (user.status === 'rejected') {
+                statusBadge = '<span class="status-badge rejected">승인 거부</span>';
+                actionButtons = `<button class="btn-admin-action approve" data-id="${user.id}"><i class="fa-solid fa-check"></i> 승인</button>
+                                 <button class="btn-admin-action delete" data-id="${user.id}"><i class="fa-solid fa-trash"></i> 삭제</button>`;
             }
 
-            const uGroups = (user.group_name || '일반').split(',').map(s => s.trim());
-
-            let groupSelectHtml = `<div class="multi-group-dropdown" data-id="${user.id}">`;
-            groupSelectHtml += `<button class="btn-multi-group-trigger" type="button">`;
-            groupSelectHtml += `<span>${escapeHtml(uGroups.join(', '))}</span> <i class="fa-solid fa-caret-down"></i>`;
-            groupSelectHtml += `</button>`;
-            groupSelectHtml += `<div class="multi-group-options hidden">`;
+            const uGroups = (user.group_name || '기본').split(',').map(s => s.trim());
+            let groupSelectHtml = `<div class="multi-group-dropdown" data-id="${user.id}"><button class="btn-multi-group-trigger" type="button"><span>${escapeHtml(uGroups.join(', '))}</span> <i class="fa-solid fa-caret-down"></i></button><div class="multi-group-options hidden">`;
             adminGroupsList.forEach(g => {
                 const isChecked = uGroups.includes(g.name) ? 'checked' : '';
-                groupSelectHtml += `
-                    <label class="multi-group-option-label">
-                        <input type="checkbox" class="chk-user-group-item" data-id="${user.id}" value="${escapeHtml(g.name)}" ${isChecked}>
-                        <span>${escapeHtml(g.name)}</span>
-                    </label>
-                `;
+                groupSelectHtml += `<label class="multi-group-option-label"><input type="checkbox" class="chk-user-group-item" data-id="${user.id}" value="${escapeHtml(g.name)}" ${isChecked}><span>${escapeHtml(g.name)}</span></label>`;
             });
             groupSelectHtml += `</div></div>`;
 
             tr.innerHTML = `
-                <td>${escapeHtml(user.username)}@onto.kr</td>
+                <td>${escapeHtml(user.username)}</td>
                 <td>${escapeHtml(user.name)}</td>
-                <td>${groupSelectHtml}</td>
-                <td>${user.created_at}</td>
-                <td>${statusBadge}</td>
-                <td class="admin-actions-cell">${actionButtons}</td>
+                <td class="col-group">${groupSelectHtml}</td>
+                <td>${user.last_login || '-'}</td>
+                <td class="col-status">${statusBadge}</td>
+                <td>
+                    <div class="admin-actions-cell">
+                        ${actionButtons}
+                    </div>
+                </td>
             `;
-
             adminUserList.appendChild(tr);
         });
 
-        // Bind Group Selection Change
+        // Re-bind actions (simplified from original for brevity, maintaining logic)
         adminUserList.querySelectorAll('.btn-multi-group-trigger').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const dropdown = btn.closest('.multi-group-dropdown');
-                const options = dropdown.querySelector('.multi-group-options');
-                
-                // Close other open ones first
-                document.querySelectorAll('.multi-group-options').forEach(opt => {
-                    if (opt !== options) opt.classList.add('hidden');
-                });
-                
+                const options = btn.nextElementSibling;
+                document.querySelectorAll('.multi-group-options').forEach(opt => { if (opt !== options) opt.classList.add('hidden'); });
                 options.classList.toggle('hidden');
-                
                 if (!options.classList.contains('hidden')) {
-                    // Position dynamically using fixed coordinates relative to the trigger button
                     const rect = btn.getBoundingClientRect();
-                    options.style.position = 'fixed';
-                    options.style.left = `${rect.left}px`;
-                    options.style.width = `${rect.width}px`;
-                    options.style.minWidth = '140px';
+                    options.style.position = 'fixed'; 
+                    options.style.left = `${rect.left}px`; 
+                    options.style.width = 'auto'; 
+                    options.style.minWidth = `${rect.width}px`;
+                    options.style.maxWidth = '300px';
                     
-                    const dropdownHeight = options.offsetHeight || 150;
-                    if (rect.bottom + dropdownHeight > window.innerHeight - 20) {
-                        options.style.top = 'auto';
-                        options.style.bottom = `${window.innerHeight - rect.top + 4}px`;
-                    } else {
-                        options.style.bottom = 'auto';
-                        options.style.top = `${rect.bottom + 4}px`;
+                    const h = options.offsetHeight || 150;
+                    if (rect.bottom + h > window.innerHeight - 20) { 
+                        options.style.top = 'auto'; 
+                        options.style.bottom = `${window.innerHeight - rect.top + 4}px`; 
+                    } else { 
+                        options.style.bottom = 'auto'; 
+                        options.style.top = `${rect.bottom + 4}px`; 
                     }
+                    
+                    // Right side overflow check
+                    setTimeout(() => {
+                        const oRect = options.getBoundingClientRect();
+                        if (oRect.right > window.innerWidth - 20) {
+                            options.style.left = 'auto';
+                            options.style.right = `${window.innerWidth - rect.right}px`;
+                        }
+                    }, 0);
                 }
             });
         });
@@ -1653,61 +1711,36 @@ document.addEventListener('DOMContentLoaded', () => {
             chk.addEventListener('change', async (evt) => {
                 const id = evt.target.dataset.id;
                 const dropdown = evt.target.closest('.multi-group-dropdown');
-                
-                const checkedCheckboxes = dropdown.querySelectorAll('.chk-user-group-item:checked');
-                const checkedGroups = Array.from(checkedCheckboxes).map(c => c.value);
-                
-                if (checkedGroups.length === 0) {
-                    evt.target.checked = true;
-                    showToast('회원은 최소 1개 이상의 그룹에 속해야 합니다.');
-                    return;
-                }
-                
+                const checkedGroups = Array.from(dropdown.querySelectorAll('.chk-user-group-item:checked')).map(c => c.value);
+                if (checkedGroups.length === 0) { evt.target.checked = true; showToast('회원은 최소 1개 이상의 그룹에 속해야 합니다.'); return; }
                 const group_names_str = checkedGroups.join(', ');
-                
                 showToast('그룹 변경 중...');
                 const r = await apiRequest('admin_update_user_group', 'POST', { id, group_name: group_names_str });
                 showToast(r.message);
-                
                 if (r.success) {
-                    // Update cache local data
                     const u = allAdminUsers.find(user => user.id == id);
                     if (u) u.group_name = group_names_str;
                     dropdown.querySelector('.btn-multi-group-trigger span').textContent = group_names_str;
-                } else {
-                    evt.target.checked = !evt.target.checked;
-                }
+                } else { evt.target.checked = !evt.target.checked; }
             });
         });
 
-        // Bind Actions
-        adminUserList.querySelectorAll('.btn-admin-action.approve').forEach(btn => {
+        adminUserList.querySelectorAll('.btn-admin-action').forEach(btn => {
             btn.onclick = async () => {
                 const id = btn.dataset.id;
-                const act = btn.textContent.includes('해제') ? 'admin_unlock' : 'admin_approve';
+                let act = '';
+                if (btn.classList.contains('approve')) act = btn.textContent.includes('해제') ? 'admin_unlock' : 'admin_approve';
+                else if (btn.classList.contains('lock')) act = 'admin_lock';
+                else if (btn.classList.contains('reject')) {
+                    if (!await customConfirm('이 사용자의 승인을 거절하시겠습니까?', 'fa-solid fa-triangle-exclamation')) return;
+                    act = 'admin_reject';
+                }
+                else if (btn.classList.contains('delete')) {
+                    if (!await customConfirm('이 계정을 삭제하시겠습니까?', 'fa-solid fa-triangle-exclamation')) return;
+                    act = 'admin_delete';
+                }
                 showToast('처리 중...');
                 const r = await apiRequest(act, 'POST', { id });
-                showToast(r.message);
-                if (r.success) loadAdminUsers(true);
-            };
-        });
-
-        adminUserList.querySelectorAll('.btn-admin-action.lock').forEach(btn => {
-            btn.onclick = async () => {
-                const id = btn.dataset.id;
-                showToast('처리 중...');
-                const r = await apiRequest('admin_lock', 'POST', { id });
-                showToast(r.message);
-                if (r.success) loadAdminUsers(true);
-            };
-        });
-
-        adminUserList.querySelectorAll('.btn-admin-action.delete').forEach(btn => {
-            btn.onclick = async () => {
-                if (!await customConfirm('이 계정을 삭제하시겠습니까? 메일 연동이 중지됩니다.', 'fa-solid fa-triangle-exclamation')) return;
-                const id = btn.dataset.id;
-                showToast('삭제 중...');
-                const r = await apiRequest('admin_delete', 'POST', { id });
                 showToast(r.message);
                 if (r.success) loadAdminUsers(true);
             };
@@ -2394,38 +2427,86 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnOpenAdminCreate = document.getElementById('btn-open-admin-create');
     const btnCloseAdminCreate = document.getElementById('btn-close-admin-create');
     const formAdminCreateUser = document.getElementById('form-admin-create-user');
-    const admGroupChecklist = document.getElementById('adm-group-checklist');
+    const admGroupOptions = document.getElementById('adm-group-options');
+    const btnAdmGroupTrigger = document.getElementById('btn-adm-group-trigger');
+
+    if (btnAdmGroupTrigger && admGroupOptions) {
+        btnAdmGroupTrigger.onclick = (e) => {
+            e.stopPropagation();
+            // Close other open ones first
+            document.querySelectorAll('.multi-group-options').forEach(opt => {
+                if (opt !== admGroupOptions) opt.classList.add('hidden');
+            });
+            admGroupOptions.classList.toggle('hidden');
+            if (!admGroupOptions.classList.contains('hidden')) {
+                const rect = btnAdmGroupTrigger.getBoundingClientRect();
+                admGroupOptions.style.position = 'fixed';
+                admGroupOptions.style.left = `${rect.left}px`;
+                admGroupOptions.style.top = `${rect.bottom + 4}px`;
+                admGroupOptions.style.width = 'auto';
+                admGroupOptions.style.minWidth = `${rect.width}px`;
+                admGroupOptions.style.maxWidth = '300px';
+                admGroupOptions.style.zIndex = '9999';
+
+                // Right side overflow check
+                setTimeout(() => {
+                    const oRect = admGroupOptions.getBoundingClientRect();
+                    if (oRect.right > window.innerWidth - 20) {
+                        admGroupOptions.style.left = 'auto';
+                        admGroupOptions.style.right = `${window.innerWidth - rect.right}px`;
+                    }
+                }, 0);
+            }
+        };
+    }
+
+    function updateAdmGroupTriggerLabel() {
+        if (!admGroupOptions || !btnAdmGroupTrigger) return;
+        const chks = admGroupOptions.querySelectorAll('input[type="checkbox"]:checked');
+        const span = btnAdmGroupTrigger.querySelector('span');
+        if (chks.length === 0) {
+            span.textContent = '그룹을 선택하세요';
+        } else if (chks.length === 1) {
+            span.textContent = chks[0].closest('label').querySelector('span').textContent;
+        } else {
+            span.textContent = `선택된 그룹: ${chks.length}개`;
+        }
+    }
 
     btnOpenAdminCreate.addEventListener('click', async () => {
-        if (admGroupChecklist) {
-            admGroupChecklist.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">로딩 중...</span>';
+        if (admGroupOptions) {
+            admGroupOptions.innerHTML = '<div style="padding: 10px; color: var(--text-muted); font-size: 13px;">로딩 중...</div>';
             const groupsRes = await apiRequest('admin_list_groups');
             if (groupsRes.success) {
-                admGroupChecklist.innerHTML = '';
+                admGroupOptions.innerHTML = '';
                 const groups = groupsRes.groups || [];
                 groups.forEach(g => {
                     const label = document.createElement('label');
-                    label.className = 'group-checklist-item';
-                    
+                    label.className = 'multi-group-option-label';
+
                     const chk = document.createElement('input');
                     chk.type = 'checkbox';
                     chk.value = g.name;
-                    if (g.name === '일반') chk.checked = true;
-                    
+                    if (g.name === '기본') chk.checked = true;
+
+                    chk.addEventListener('change', updateAdmGroupTriggerLabel);
+
                     const span = document.createElement('span');
                     span.textContent = g.name;
-                    
+
                     label.appendChild(chk);
                     label.appendChild(span);
-                    admGroupChecklist.appendChild(label);
+                    admGroupOptions.appendChild(label);
                 });
+                updateAdmGroupTriggerLabel();
             } else {
-                admGroupChecklist.innerHTML = `
-                    <label class="group-checklist-item">
-                        <input type="checkbox" value="일반" checked>
-                        <span>일반</span>
+                admGroupOptions.innerHTML = `
+                    <label class="multi-group-option-label">
+                        <input type="checkbox" value="기본" checked>
+                        <span>기본</span>
                     </label>
                 `;
+                updateAdmGroupTriggerLabel();
             }
         }
         adminCreateUserModal.classList.remove('hidden');
@@ -2440,8 +2521,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const username = formAdminCreateUser.username.value;
         const name = formAdminCreateUser.name.value;
         const password = formAdminCreateUser.password.value;
-        
-        const checkedGroupNodes = admGroupChecklist ? admGroupChecklist.querySelectorAll('input[type="checkbox"]:checked') : [];
+
+        const checkedGroupNodes = admGroupOptions ? admGroupOptions.querySelectorAll('input[type="checkbox"]:checked') : [];
         const checkedGroups = Array.from(checkedGroupNodes).map(chk => chk.value);
         if (checkedGroups.length === 0) {
             showToast('그룹을 최소 1개 이상 지정해주세요.');
@@ -2498,7 +2579,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             groups.forEach(group => {
                 const tr = document.createElement('tr');
-                const isDefaultGroup = group.name === '일반';
+                const isDefaultGroup = group.name === '기본';
                 
                 const actionsHtml = `
                     <button class="btn-group-lock btn-admin-action lock" data-group="${escapeHtml(group.name)}"><i class="fa-solid fa-lock"></i> 잠금</button>
@@ -2508,7 +2589,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 tr.innerHTML = `
                     <td><i class="fa-solid fa-users" style="color: var(--color-primary); margin-right: 8px;"></i> ${escapeHtml(group.name)}</td>
-                    <td class="admin-actions-cell" style="text-align: center; justify-content: center;">
+                    <td class="admin-actions-cell" style="text-align: left; justify-content: flex-start;">
                         ${actionsHtml}
                     </td>
                 `;
@@ -2569,6 +2650,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.success) {
                 newGroupNameInput.value = '';
                 loadGroupsModalList(true);
+                // Also refresh main admin user list to update group filter
+                loadAdminUsers(true);
             }
         });
     }
@@ -2606,29 +2689,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctxMenu = document.getElementById('mail-context-menu');
     let targetEmailId = null;
 
-    function getSelectedEmailIds() {
-        const chks = document.querySelectorAll('.mail-item-chk:checked');
-        if (chks.length > 0) {
-            return Array.from(chks).map(chk => ({
-                id: chk.dataset.id,
-                from: chk.dataset.from,
-                folder: chk.dataset.folder
-            }));
-        }
-        return [];
-    }
-
     function getTargetEmails() {
-        const selected = getSelectedEmailIds();
-        if (selected.length > 0) {
-            return selected;
+        const chks = document.querySelectorAll('.mail-item-chk:checked');
+        const selected = [];
+        
+        if (chks.length > 0) {
+            Array.from(chks).forEach(chk => {
+                selected.push({
+                    id: chk.dataset.id,
+                    from: chk.dataset.from,
+                    folder: chk.dataset.folder
+                });
+            });
         }
-        const targetEmail = state.emails.find(e => e.id === targetEmailId);
-        return [{ 
-            id: targetEmailId, 
-            from: targetEmail ? targetEmail.from : '',
-            folder: targetEmail ? targetEmail.folder : state.currentFolder
-        }];
+        
+        // Ensure right-clicked target is also included
+        if (targetEmailId) {
+            const targetBase = getBaseId(targetEmailId);
+            const isIncluded = selected.some(s => getBaseId(s.id) === targetBase);
+            if (!isIncluded) {
+                const targetEmail = state.emails.find(e => getBaseId(e.id) === targetBase);
+                if (targetEmail) {
+                    selected.push({
+                        id: targetEmailId,
+                        from: targetEmail.from,
+                        folder: targetEmail.folder || state.currentFolder
+                    });
+                } else {
+                    selected.push({
+                        id: targetEmailId,
+                        from: '',
+                        folder: state.currentFolder
+                    });
+                }
+            }
+        }
+        
+        return selected;
     }
 
     async function showMailContextMenu(e, emailId) {
