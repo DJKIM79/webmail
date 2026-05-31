@@ -95,7 +95,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Nav Items
     const navItems = document.querySelectorAll('.nav-item');
-    const badgeUnread = document.getElementById('badge-unread');
     const profileName = document.getElementById('profile-name');
     const profileEmail = document.getElementById('profile-email');
     
@@ -172,6 +171,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (modalEl === authModal && !state.user) {
                     return;
                 }
+                if (modalEl === composeModal) {
+                    attemptCloseCompose();
+                    return;
+                }
                 modalEl.classList.add('hidden');
             }
         });
@@ -224,18 +227,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 'admin-create-user-modal',                 // z-index 140
                 'admin-modal',                            // z-index 130
                 'settings-modal',                         // z-index 120
+                'compose-confirm-modal',                  // z-index 105
                 'compose-modal', 'auth-modal', 'locked-modal' // z-index 100
             ];
             
             for (const id of overlays) {
                 const el = document.getElementById(id);
                 if (el && !el.classList.contains('hidden')) {
-                    el.classList.add('hidden');
+                    if (id === 'compose-modal') {
+                        attemptCloseCompose();
+                    } else {
+                        el.classList.add('hidden');
+                    }
                     return; // Close only the topmost and exit
                 }
             }
         }
     });
+
+    function attemptCloseCompose() {
+        const to = formCompose.to.value.trim();
+        const subject = formCompose.subject.value.trim();
+        const body = quillEditor ? quillEditor.getText().trim() : formCompose.body.value.trim();
+        
+        // Ignore <p><br></p> or empty spaces as content
+        const isBodyEmpty = body.length === 0 && (!quillEditor || !quillEditor.root.innerHTML.includes('<img'));
+        
+        if (to || subject || !isBodyEmpty) {
+            document.getElementById('compose-confirm-modal').classList.remove('hidden');
+        } else {
+            composeModal.classList.add('hidden');
+        }
+    }
 
     
     function syncActiveFolderUI() {
@@ -751,6 +774,13 @@ document.addEventListener('DOMContentLoaded', () => {
             btnRefresh.classList.add('refreshing');
         }
 
+        // Immediately reset selection and reader when switching folders
+        if (!isSameFolder) {
+            state.selectedEmailId = null;
+            if (readerContent) readerContent.classList.add('hidden');
+            if (readerEmpty) readerEmpty.classList.remove('hidden');
+        }
+
         // --- Flicker-free logic ---
         const hasExistingList = mailContainer.querySelector('.mail-list-table') !== null;
         
@@ -765,19 +795,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Don't show full loading overlay if we have cached content to show
             showLoading = false;
-        }
-
-        // Only fade out if no cache and we are switching folders
-        const shouldFade = showLoading && !isSameFolder && !state.folderCache[folder];
-
-        if (shouldFade) {
-            const tbody = mailContainer.querySelector('#mail-list-tbody');
-            if (hasExistingList && tbody) {
-                tbody.classList.add('loading-fade');
-            } else {
-                mailContainer.classList.add('loading');
+        } else if (!isSameFolder) {
+            // No cache & switching folder: immediately empty the state and show loading row spinner
+            state.emails = [];
+            renderMailList();
+            
+            const emptyOverlay = mailContainer.querySelector('.mail-list-empty-overlay');
+            if (emptyOverlay) {
+                emptyOverlay.remove();
             }
-            await new Promise(resolve => setTimeout(resolve, 150));
+            
+            const tbody = mailContainer.querySelector('#mail-list-tbody');
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px 0; color: var(--text-secondary);"><i class="fa-solid fa-spinner fa-spin" style="margin-right: 8px;"></i>메일을 불러오는 중입니다...</td></tr>`;
+            }
         }
 
         // Fetch emails from the server
@@ -805,7 +836,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // If we're still on the same folder we requested, update UI
             if (state.currentFolder === folder) {
-                const canDoPartialUpdate = hasExistingList && tbody;
+                const canDoPartialUpdate = hasExistingList && tbody && isSameFolder;
                 
                 if (canDoPartialUpdate) {
                     // Calculate simple email addition
@@ -1219,30 +1250,53 @@ document.addEventListener('DOMContentLoaded', () => {
     async function updateGlobalUnreadCount() {
         if (state.user === null) return;
         
-        const selBase = getBaseId(state.selectedEmailId);
-        
-        // If we are currently in INBOX, we don't need a separate API call
-        if (state.currentFolder === 'INBOX') {
-            state.unreadCount = state.emails.filter(e => !e.seen && getBaseId(e.id) !== selBase).length;
-            if (state.unreadCount > 0) {
-                badgeUnread.textContent = state.unreadCount;
-                badgeUnread.style.display = 'inline-block';
-            } else {
-                badgeUnread.style.display = 'none';
-            }
-            return;
-        }
-        
-        // Otherwise, fetch INBOX list to get the unread count
         try {
-            const res = await apiRequest('list_emails', 'GET', { folder: 'INBOX' });
-            if (res.success && res.emails) {
-                const unread = res.emails.filter(e => !e.seen && getBaseId(e.id) !== selBase).length;
-                if (unread > 0) {
-                    badgeUnread.textContent = unread;
-                    badgeUnread.style.display = 'inline-block';
-                } else {
-                    badgeUnread.style.display = 'none';
+            const res = await apiRequest('get_unread_counts');
+            if (res.success && res.unread_counts) {
+                const counts = res.unread_counts;
+                
+                // 1. Update all nav item badges (INBOX, Starred, Sent, Drafts, Trash, Custom Tags, Ext folders)
+                const navItems = document.querySelectorAll('.sidebar-nav .nav-item, .sidebar-tags .nav-item');
+                navItems.forEach(item => {
+                    const folder = item.dataset.folder;
+                    if (!folder) return;
+                    
+                    const badge = item.querySelector('.badge');
+                    if (!badge) return;
+                    
+                    let unread = counts[folder] || 0;
+                    if (state.currentFolder === folder) {
+                        const selBase = getBaseId(state.selectedEmailId);
+                        unread = state.emails.filter(e => !e.seen && getBaseId(e.id) !== selBase).length;
+                        // Keep server cache in sync locally
+                        counts[folder] = unread;
+                    }
+                    
+                    if (unread > 0) {
+                        badge.textContent = unread;
+                        badge.style.display = 'inline-flex';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                });
+                
+                // 2. Calculate and update combined unread count for custom tags (personal folders)
+                const badgeTagsCombined = document.getElementById('badge-tags-combined');
+                if (badgeTagsCombined) {
+                    let tagsSum = 0;
+                    Object.keys(counts).forEach(key => {
+                        // Sum up unread counts of folders that are not built-in and not external
+                        if (key !== 'INBOX' && key !== 'Sent' && key !== 'Drafts' && key !== 'Trash' && key !== 'unified_inbox' && !key.startsWith('ext_')) {
+                            tagsSum += counts[key];
+                        }
+                    });
+                    
+                    if (tagsSum > 0) {
+                        badgeTagsCombined.textContent = tagsSum;
+                        badgeTagsCombined.style.display = 'inline-flex';
+                    } else {
+                        badgeTagsCombined.style.display = 'none';
+                    }
                 }
             }
         } catch (err) {
@@ -1283,6 +1337,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     a.innerHTML = `
                         <i class="fa-solid fa-folder" style="color: ${folderColor};"></i>
                         <span class="nav-label">${escapeHtml(tag)}</span>
+                        <span class="badge" style="display:none;">0</span>
                     `;
                     a.addEventListener('click', (e) => {
                         e.preventDefault();
@@ -1332,10 +1387,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function selectEmail(id) {
         console.log("selectEmail started. id:", id);
-        showToast("메일을 불러오는 중... (ID: " + id.substring(0, 10) + ")");
         try {
             state.selectedEmailId = id;
             const targetBase = getBaseId(id);
+
+            // Hide iframe and clear any pending onload immediately to prevent showing old mail or flashing during fetch
+            if (mailBodyFrame) {
+                mailBodyFrame.onload = null;
+                mailBodyFrame.style.opacity = '0';
+            }
 
             document.querySelectorAll('.mail-item').forEach(el => {
                 if (getBaseId(el.dataset.id) === targetBase) {
@@ -1362,17 +1422,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 const resTags = await apiRequest('list_tags');
                 tagMoveDropdownList.innerHTML = '';
                 if (resTags.success) {
+                    const emailInState = state.emails.find(e => e.id === id);
+                    const emailAcc = emailInState ? (state.externalMails || []).find(a => a.id == emailInState.account_id || (a.service_type === 'onto' && !emailInState.account_id)) : null;
+                    const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
+                    const accountLabel = emailAcc ? (emailAcc.service_type === 'onto' ? 'OnTo' : (emailAcc.service_type === 'naver' ? 'Naver' : (emailAcc.service_type === 'gmail' ? 'Gmail' : (emailAcc.service_type === 'daum' ? 'Daum' : (emailAcc.service_type === 'kakao' ? 'Kakao' : emailAcc.email))))) : '';
+
                     const allDestinations = ['INBOX', ...(resTags.tags || [])];
                     let addedCount = 0;
                     allDestinations.forEach(dest => {
-                        if (dest === state.currentFolder) return;
-                        
+                        let destName = '';
+                        let destColor = '';
+                        if (typeof dest === 'string') {
+                            destName = dest;
+                            destColor = getFolderColor(dest);
+                        } else if (dest && typeof dest === 'object') {
+                            destName = dest.name;
+                            destColor = dest.color || getFolderColor(destName);
+                        }
+
+                        if (destName === state.currentFolder) return;
+
                         const a = document.createElement('a');
                         a.href = '#';
-                        const folderColor = getFolderColor(dest);
+
+                        // Unify folder color with email account color if possible
+                        const folderColor = emailAcc ? emailAcc.color : destColor;
+
+                        // Display format: e.g., '받은 편지함 (OnTo)' or just '받은 편지함'
+                        let displayLabel = '';
+                        if (destName === 'INBOX') {
+                            displayLabel = (activeAccs.length > 1 && accountLabel) ? `받은 편지함 (${accountLabel})` : '받은 편지함';
+                        } else {
+                            displayLabel = (activeAccs.length > 1 && accountLabel) ? `${destName} (${accountLabel})` : destName;
+                        }
+
                         a.innerHTML = `
                             <i class="fa-solid fa-folder" style="color: ${folderColor}; margin-right: 8px;"></i>
-                            <span>${dest === 'INBOX' ? '받은 편지함 (INBOX)' : escapeHtml(dest)}</span>
+                            <span>${escapeHtml(displayLabel)}</span>
                         `;
                         a.addEventListener('click', async (evt) => {
                             evt.preventDefault();
@@ -1380,7 +1466,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const rMove = await apiRequest('move_email', 'POST', {
                                 id: id,
                                 folder: state.currentFolder,
-                                dest_folder: dest
+                                dest_folder: destName
                             });
                             showToast(rMove.message);
                             if (rMove.success) {
@@ -1411,7 +1497,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (res.success && res.email) {
                 const email = res.email;
-                showToast("메일 데이터 로드 완료. 렌더링 중...");
 
                 // If the ID has changed (e.g., marked as seen and renamed), update it in the DOM
                 if (email.id !== id) {
@@ -1474,7 +1559,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
                 
                 const content = `
-                    <html>
+                    <html style="background-color: ${bodyBg}; color: ${bodyColor};">
                     <head>
                         <style>
                             body {
@@ -1483,17 +1568,30 @@ document.addEventListener('DOMContentLoaded', () => {
                                 line-height: 1.6;
                                 padding: 24px;
                                 margin: 0;
+                                background-color: ${bodyBg} !important;
+                                color: ${bodyColor} !important;
                             }
                             a { color: ${linkColor}; }
                             ${themeOverrideCss}
                         </style>
                     </head>
-                    <body>
+                    <body style="background-color: ${bodyBg}; color: ${bodyColor};">
                         ${email.body || '(내용 없음)'}
                     </body>
                     </html>
                 `;
                 
+                // Hide iframe to avoid white load flash
+                mailBodyFrame.style.opacity = '0';
+
+                // Register load listener BEFORE assigning srcdoc to catch it reliably and overwrite any previous listeners
+                mailBodyFrame.onload = () => {
+                    // Defer showing iframe slightly to ensure layout and first paint are completed
+                    setTimeout(() => {
+                        mailBodyFrame.style.opacity = '1';
+                    }, 50);
+                };
+
                 // Render email body inside sandboxed iframe using srcdoc for modern browser support and security compliance
                 mailBodyFrame.srcdoc = content;
                 console.log("mailBodyFrame srcdoc successfully assigned.");
@@ -1553,7 +1651,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.selectedEmailId = res.email.id;
                 
                 updateGlobalUnreadCount();
-                showToast("이메일 로드 완료!", 1500);
             } else {
                 showToast("이메일 불러오기 실패: " + (res.message || "알 수 없는 오류"));
             }
@@ -1669,13 +1766,416 @@ document.addEventListener('DOMContentLoaded', () => {
         }, false);
     }
 
+    let quillEditor = null;
+
+    function initCustomToolbar(editor) {
+        const toolbar = document.getElementById('custom-editor-toolbar');
+        if (!toolbar) return;
+
+        // Custom Toolbar horizontal scrolling with arrows
+        const leftBtn = document.getElementById('custom-toolbar-nav-left');
+        const rightBtn = document.getElementById('custom-toolbar-nav-right');
+
+        if (leftBtn && rightBtn) {
+            const updateArrows = () => {
+                const scrollLeft = toolbar.scrollLeft;
+                const scrollWidth = toolbar.scrollWidth;
+                const clientWidth = toolbar.clientWidth;
+
+                if (scrollLeft > 2) {
+                    leftBtn.classList.remove('hidden');
+                } else {
+                    leftBtn.classList.add('hidden');
+                }
+
+                if (scrollWidth > clientWidth && scrollLeft < (scrollWidth - clientWidth - 2)) {
+                    rightBtn.classList.remove('hidden');
+                } else {
+                    rightBtn.classList.add('hidden');
+                }
+            };
+
+            const scrollAmount = 150;
+            leftBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                toolbar.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+            });
+            rightBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                toolbar.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+            });
+
+            toolbar.addEventListener('scroll', updateArrows);
+            window.addEventListener('resize', updateArrows);
+            toolbar.addEventListener('refresh-arrows', updateArrows);
+
+            setTimeout(updateArrows, 200);
+        }
+
+        // Toggle dropdown open/close
+        const dropdowns = toolbar.querySelectorAll('.toolbar-dropdown-wrapper');
+        dropdowns.forEach(wrapper => {
+            const trigger = wrapper.querySelector('.toolbar-dropdown-trigger, .toolbar-btn');
+            const menu = wrapper.querySelector('.toolbar-dropdown-menu');
+            if (trigger && menu) {
+                trigger.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    // Close all other dropdowns
+                    dropdowns.forEach(other => {
+                        if (other !== wrapper) {
+                            other.classList.remove('open');
+                            const otherMenu = other.querySelector('.toolbar-dropdown-menu');
+                            if (otherMenu) otherMenu.classList.add('hidden');
+                        }
+                    });
+                    wrapper.classList.toggle('open');
+                    menu.classList.toggle('hidden');
+                });
+            }
+        });
+
+        // Close dropdowns on outside click
+        document.addEventListener('click', () => {
+            dropdowns.forEach(wrapper => {
+                wrapper.classList.remove('open');
+                const menu = wrapper.querySelector('.toolbar-dropdown-menu');
+                if (menu) menu.classList.add('hidden');
+            });
+        });
+
+        // Prevent editor loss of focus when clicking custom toolbar elements
+        toolbar.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+        });
+
+        // Font selection handler
+        const fontItems = toolbar.querySelectorAll('.font-item');
+        fontItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const fontVal = item.getAttribute('data-font');
+                editor.format('font', fontVal);
+                
+                fontItems.forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                const label = toolbar.querySelector('#btn-toolbar-font .trigger-label');
+                if (label) label.textContent = item.textContent;
+            });
+        });
+
+        // Size selection handler
+        const sizeItems = toolbar.querySelectorAll('.size-item');
+        sizeItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const sizeVal = item.getAttribute('data-size');
+                editor.format('size', sizeVal);
+
+                sizeItems.forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+
+                const label = toolbar.querySelector('#btn-toolbar-size .trigger-label');
+                if (label) label.textContent = item.textContent;
+            });
+        });
+
+        // Standard Style buttons (Bold, Italic, Underline, Strike)
+        const formatBtns = toolbar.querySelectorAll('.toolbar-btn[data-format]');
+        formatBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const format = btn.getAttribute('data-format');
+                const currentFormats = editor.getFormat();
+                
+                if (format === 'bold') editor.format('bold', !currentFormats.bold);
+                else if (format === 'italic') editor.format('italic', !currentFormats.italic);
+                else if (format === 'underline') editor.format('underline', !currentFormats.underline);
+                else if (format === 'strike') editor.format('strike', !currentFormats.strike);
+            });
+        });
+
+        // Text Color palette handler
+        const colorDots = toolbar.querySelectorAll('.color-dot[data-color]');
+        colorDots.forEach(dot => {
+            dot.addEventListener('click', () => {
+                const color = dot.getAttribute('data-color');
+                editor.format('color', color);
+                
+                colorDots.forEach(d => d.classList.remove('active'));
+                dot.classList.add('active');
+                
+                const indicator = toolbar.querySelector('#indicator-text-color');
+                if (indicator) indicator.style.backgroundColor = color;
+            });
+        });
+
+        // Highlight/Background Color palette handler
+        const bgDots = toolbar.querySelectorAll('.color-dot[data-bg]');
+        bgDots.forEach(dot => {
+            dot.addEventListener('click', () => {
+                const bg = dot.getAttribute('data-bg');
+                editor.format('background', bg === 'transparent' ? false : bg);
+
+                bgDots.forEach(d => d.classList.remove('active'));
+                dot.classList.add('active');
+
+                const indicator = toolbar.querySelector('#indicator-bg-color');
+                if (indicator) {
+                    indicator.style.backgroundColor = bg === 'transparent' ? 'transparent' : bg;
+                }
+            });
+        });
+
+        // Alignment handler
+        const alignBtns = toolbar.querySelectorAll('.toolbar-btn[data-align]');
+        alignBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const alignVal = btn.getAttribute('data-align');
+                editor.format('align', alignVal || false);
+            });
+        });
+
+        // List handler
+        const listBtns = toolbar.querySelectorAll('.toolbar-btn[data-list]');
+        listBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const listVal = btn.getAttribute('data-list');
+                const currentFormats = editor.getFormat();
+                editor.format('list', currentFormats.list === listVal ? false : listVal);
+            });
+        });
+
+        // Insert Link handler
+        const insertLinkBtn = toolbar.querySelector('.toolbar-btn[data-insert="link"]');
+        if (insertLinkBtn) {
+            insertLinkBtn.addEventListener('click', () => {
+                const range = editor.getSelection();
+                const url = prompt('연결할 URL 링크를 입력하세요:', 'https://');
+                if (url) {
+                    if (range && range.length > 0) {
+                        editor.format('link', url);
+                    } else {
+                        const index = range ? range.index : editor.getLength() - 1;
+                        editor.insertText(index, url, 'link', url);
+                    }
+                }
+            });
+        }
+
+        // Insert Image handler
+        const insertImgBtn = toolbar.querySelector('.toolbar-btn[data-insert="image"]');
+        if (insertImgBtn) {
+            insertImgBtn.addEventListener('click', () => {
+                const input = document.createElement('input');
+                input.setAttribute('type', 'file');
+                input.setAttribute('accept', 'image/*');
+                input.click();
+                input.onchange = () => {
+                    const file = input.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const range = editor.getSelection();
+                            const index = range ? range.index : editor.getLength() - 1;
+                            editor.insertEmbed(index, 'image', e.target.result);
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                };
+            });
+        }
+
+        // Insert Table handler
+        const insertTableBtn = toolbar.querySelector('.toolbar-btn[data-insert="table"]');
+        if (insertTableBtn) {
+            insertTableBtn.addEventListener('click', () => {
+                const tableModule = editor.getModule('table');
+                if (tableModule) {
+                    tableModule.insertTable(2, 2);
+                } else {
+                    console.error('Table module not enabled in Quill');
+                }
+            });
+        }
+
+        // Blockquote handler
+        const quoteBtn = toolbar.querySelector('.toolbar-btn[data-insert="blockquote"]');
+        if (quoteBtn) {
+            quoteBtn.addEventListener('click', () => {
+                const currentFormats = editor.getFormat();
+                editor.format('blockquote', !currentFormats.blockquote);
+            });
+        }
+
+        // Code-block handler
+        const codeBtn = toolbar.querySelector('.toolbar-btn[data-insert="code-block"]');
+        if (codeBtn) {
+            codeBtn.addEventListener('click', () => {
+                const currentFormats = editor.getFormat();
+                const hasCode = currentFormats['code-block'];
+                editor.format('code-block', !hasCode);
+            });
+        }
+
+        // Clean formatter handler
+        const cleanBtn = toolbar.querySelector('#btn-toolbar-clean');
+        if (cleanBtn) {
+            cleanBtn.addEventListener('click', () => {
+                const range = editor.getSelection();
+                if (range) {
+                    editor.removeFormat(range.index, range.length);
+                }
+            });
+        }
+
+        // Watch for editor selection/content change to update active state
+        const updateToolbarState = () => {
+            const range = editor.getSelection();
+            const formats = range ? editor.getFormat(range) : editor.getFormat();
+
+            // Style buttons active states
+            const boldBtn = toolbar.querySelector('.toolbar-btn[data-format="bold"]');
+            if (boldBtn) boldBtn.classList.toggle('active', !!formats.bold);
+            
+            const italicBtn = toolbar.querySelector('.toolbar-btn[data-format="italic"]');
+            if (italicBtn) italicBtn.classList.toggle('active', !!formats.italic);
+            
+            const underlineBtn = toolbar.querySelector('.toolbar-btn[data-format="underline"]');
+            if (underlineBtn) underlineBtn.classList.toggle('active', !!formats.underline);
+            
+            const strikeBtn = toolbar.querySelector('.toolbar-btn[data-format="strike"]');
+            if (strikeBtn) strikeBtn.classList.toggle('active', !!formats.strike);
+            
+            const quote = toolbar.querySelector('.toolbar-btn[data-insert="blockquote"]');
+            if (quote) quote.classList.toggle('active', !!formats.blockquote);
+            
+            const code = toolbar.querySelector('.toolbar-btn[data-insert="code-block"]');
+            if (code) code.classList.toggle('active', !!formats['code-block']);
+
+            // Lists
+            const bulletBtn = toolbar.querySelector('.toolbar-btn[data-list="bullet"]');
+            if (bulletBtn) bulletBtn.classList.toggle('active', formats.list === 'bullet');
+            
+            const orderedBtn = toolbar.querySelector('.toolbar-btn[data-list="ordered"]');
+            if (orderedBtn) orderedBtn.classList.toggle('active', formats.list === 'ordered');
+
+            // Alignment buttons
+            const alignVal = formats.align || '';
+            alignBtns.forEach(btn => {
+                const val = btn.getAttribute('data-align') || '';
+                btn.classList.toggle('active', val === alignVal);
+            });
+
+            // Update Font dropdown label & active class
+            const currentFont = formats.font || '';
+            const fontLabel = toolbar.querySelector('#btn-toolbar-font .trigger-label');
+            if (fontLabel) {
+                const activeFontItem = toolbar.querySelector(`.font-item[data-font="${currentFont}"]`);
+                fontItems.forEach(i => i.classList.remove('active'));
+                if (activeFontItem) {
+                    activeFontItem.classList.add('active');
+                    fontLabel.textContent = activeFontItem.textContent;
+                } else {
+                    fontLabel.textContent = '기본 폰트';
+                }
+            }
+
+            // Update Size dropdown label & active class
+            const currentSize = formats.size || '';
+            const sizeLabel = toolbar.querySelector('#btn-toolbar-size .trigger-label');
+            if (sizeLabel) {
+                const activeSizeItem = toolbar.querySelector(`.size-item[data-size="${currentSize}"]`);
+                sizeItems.forEach(i => i.classList.remove('active'));
+                if (activeSizeItem) {
+                    activeSizeItem.classList.add('active');
+                    sizeLabel.textContent = activeSizeItem.textContent;
+                } else {
+                    sizeLabel.textContent = '보통';
+                }
+            }
+
+            // Update color dots active states & indicator
+            const defaultColor = document.body.classList.contains('theme-white') ? '#111827' : '#f3f4f6';
+            const currentColor = formats.color || defaultColor;
+            colorDots.forEach(dot => {
+                const dotColor = dot.getAttribute('data-color');
+                dot.classList.toggle('active', dotColor === currentColor);
+            });
+            const textIndicator = toolbar.querySelector('#indicator-text-color');
+            if (textIndicator) textIndicator.style.backgroundColor = currentColor;
+
+            // Update bg dots active states & indicator
+            const currentBg = formats.background || 'transparent';
+            bgDots.forEach(dot => {
+                const dotBg = dot.getAttribute('data-bg');
+                dot.classList.toggle('active', dotBg === currentBg);
+            });
+            const bgIndicator = toolbar.querySelector('#indicator-bg-color');
+            if (bgIndicator) {
+                bgIndicator.style.backgroundColor = currentBg === 'transparent' ? 'transparent' : currentBg;
+            }
+        };
+
+        editor.on('selection-change', (range) => {
+            if (range) {
+                updateToolbarState();
+            }
+        });
+        editor.on('text-change', () => {
+            updateToolbarState();
+        });
+        
+        // Initial run
+        updateToolbarState();
+    }
+
     function openCompose(to = '', subject = '', body = '') {
         formCompose.to.value = to;
         formCompose.subject.value = subject;
-        formCompose.body.value = body;
+        formCompose.body.value = body; // used as fallback or internal state
         uploadedFiles = [];
         updateAttachmentsList();
         composeModal.classList.remove('hidden');
+
+        if (!quillEditor) {
+            const Font = Quill.import('formats/font');
+            Font.whitelist = ['', 'malgungothic', 'dotum', 'gulim', 'batang', 'gungsuh'];
+            Quill.register(Font, true);
+
+            quillEditor = new Quill('#quill-editor', {
+                theme: 'snow',
+                modules: {
+                    table: true,
+                    toolbar: false // Disable Quill default toolbar
+                },
+                placeholder: '여기에 메일 내용을 작성하세요...'
+            });
+
+            // Initialize custom toolbar event handlers
+            initCustomToolbar(quillEditor);
+        }
+        
+        // Construct body with signature if enabled
+        let signatureHtml = '';
+        if (state.user && state.user.use_signature && state.user.signature) {
+            const rawSig = state.user.signature;
+            // If signature looks like HTML (has < and >), use it as is; otherwise convert \n to <br>
+            const formattedSig = (rawSig.includes('<') && rawSig.includes('>')) ? rawSig : rawSig.replace(/\n/g, '<br>');
+            signatureHtml = `<br><br>--<br>${formattedSig}`;
+        }
+
+        let htmlBody = '';
+        if (body) {
+            if (body.startsWith('\n\n')) {
+                htmlBody = '<br><br>' + signatureHtml + body.substring(2).replace(/\n/g, '<br>');
+            } else {
+                htmlBody = body.replace(/\n/g, '<br>');
+                if (signatureHtml && (!state.user.signature || !body.includes(state.user.signature))) {
+                    htmlBody += signatureHtml;
+                }
+            }
+        } else {
+            htmlBody = signatureHtml;
+        }
+        quillEditor.root.innerHTML = htmlBody;
         
         // Autofocus the recipient input field
         setTimeout(() => {
@@ -1683,20 +2183,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 formCompose.to.focus();
             }
         }, 50);
+
+        // Refresh custom toolbar scroll navigation arrows
+        setTimeout(() => {
+            const toolbar = document.getElementById('custom-editor-toolbar');
+            if (toolbar) {
+                toolbar.dispatchEvent(new Event('refresh-arrows'));
+            }
+        }, 150);
     }
 
     formCompose.addEventListener('submit', async (e) => {
         e.preventDefault();
         const to = formCompose.to.value;
         const subject = formCompose.subject.value;
-        const body = formCompose.body.value;
+        let body = '';
+        
+        if (quillEditor) {
+            body = quillEditor.root.innerHTML;
+            if (quillEditor.getText().trim().length === 0 && !body.includes('<img')) {
+                showToast('내용을 입력해주세요.');
+                return;
+            }
+        }
 
         showToast('메일을 발송 중입니다...');
-        
+
         const formData = new FormData();
         formData.append('to', to);
         formData.append('subject', subject);
         formData.append('body', body);
+        formData.append('is_html', 1); // Always send as HTML
         uploadedFiles.forEach(file => {
             formData.append('attachments[]', file);
         });
@@ -2039,7 +2556,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // EVENT LISTENERS
     // --------------------------------------------------
     btnCompose.addEventListener('click', () => openCompose());
-    if (btnCloseCompose) btnCloseCompose.addEventListener('click', () => composeModal.classList.add('hidden'));
+    if (btnCloseCompose) btnCloseCompose.addEventListener('click', attemptCloseCompose);
+    
+    const btnComposeConfirmDelete = document.getElementById('btn-compose-confirm-delete');
+    if (btnComposeConfirmDelete) {
+        btnComposeConfirmDelete.addEventListener('click', () => {
+            document.getElementById('compose-confirm-modal').classList.add('hidden');
+            composeModal.classList.add('hidden');
+            formCompose.reset();
+            if (quillEditor) {
+                quillEditor.root.innerHTML = '';
+            }
+        });
+    }
+
+    setupClickOutside(document.getElementById('compose-confirm-modal'));
     
     btnRefresh.addEventListener('click', () => loadEmails(state.currentFolder, false));
     
@@ -2322,6 +2853,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (r.success) {
                         loadTagsModalList(true);
                         loadTags();
+                        updateGlobalUnreadCount();
                         if (state.currentFolder === tName) {
                             setCookie('currentFolder', 'INBOX');
                             loadEmails('INBOX');
@@ -2764,23 +3296,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 <a href="#" class="nav-item" data-folder="INBOX">
                     <i class="fa-solid fa-inbox"></i>
                     <span class="nav-label">받은 편지함</span>
-                    <span id="badge-unread" class="badge" style="display:none;">0</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Starred">
                     <i class="fa-solid fa-star" style="color: var(--color-warning, #f59e0b);"></i>
                     <span class="nav-label">즐겨찾기</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Sent">
                     <i class="fa-solid fa-paper-plane"></i>
                     <span class="nav-label">보낸 편지함</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Drafts">
                     <i class="fa-solid fa-file-signature"></i>
                     <span class="nav-label">임시 보관함</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Trash">
                     <i class="fa-solid fa-trash-can"></i>
                     <span class="nav-label">휴지통</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
 
                 <!-- Collapsible Tags Menu -->
@@ -2789,6 +3325,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <i class="fa-solid fa-box-archive"></i>
                         <span class="nav-label">개인 보관함</span>
                         <i class="fa-solid fa-caret-down arrow-icon" id="tags-menu-arrow"></i>
+                        <span class="badge" id="badge-tags-combined" style="display:none;">0</span>
                     </div>
                     
                     <div id="tags-popover" class="tags-popover hidden">
@@ -2810,6 +3347,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <a href="#" class="nav-item" data-folder="unified_inbox">
                     <i class="fa-solid fa-envelopes-bulk" style="color: var(--color-primary);"></i>
                     <span class="nav-label">전체 받은 편지함</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
             `;
 
@@ -2841,18 +3379,22 @@ document.addEventListener('DOMContentLoaded', () => {
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_INBOX">
                             <i class="fa-solid fa-inbox"></i>
                             <span class="nav-label">받은 편지함</span>
+                            <span class="badge" style="display:none;">0</span>
                         </a>
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_Sent">
                             <i class="fa-solid fa-paper-plane"></i>
                             <span class="nav-label">보낸 편지함</span>
+                            <span class="badge" style="display:none;">0</span>
                         </a>
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_Drafts">
                             <i class="fa-solid fa-file-signature"></i>
                             <span class="nav-label">임시 보관함</span>
+                            <span class="badge" style="display:none;">0</span>
                         </a>
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_Trash">
                             <i class="fa-solid fa-trash-can"></i>
                             <span class="nav-label">휴지통</span>
+                            <span class="badge" style="display:none;">0</span>
                         </a>
                 `;
 
@@ -2864,6 +3406,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <i class="fa-solid fa-box-archive"></i>
                                 <span class="nav-label">개인 보관함</span>
                                 <i class="fa-solid fa-caret-down arrow-icon" id="tags-menu-arrow"></i>
+                                <span class="badge" id="badge-tags-combined" style="display:none;">0</span>
                             </div>
                             
                             <div id="tags-popover" class="tags-popover hidden">
@@ -3028,6 +3571,89 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
+
+    // --------------------------------------------------
+    // SIGNATURE SETTINGS MODAL UI
+    // --------------------------------------------------
+    const signatureModal = document.getElementById('signature-modal');
+    const btnManageSignature = document.getElementById('btn-manage-signature');
+    const btnCloseSignature = document.getElementById('btn-close-signature');
+    const formSignature = document.getElementById('form-signature');
+    const sigUseCheckbox = document.getElementById('sig-use');
+    const sigContentTextarea = document.getElementById('sig-content');
+    const sigPreviewDiv = document.getElementById('sig-preview');
+
+    function updateSigPreview() {
+        if (!sigPreviewDiv) return;
+        const useSig = sigUseCheckbox.checked;
+        const text = sigContentTextarea.value;
+
+        if (sigContentTextarea) {
+            sigContentTextarea.disabled = !useSig;
+        }
+
+        if (!useSig) {
+            sigPreviewDiv.style.opacity = '0.5';
+            sigPreviewDiv.innerHTML = '<span style="color: var(--text-secondary); font-style: italic;">서명 사용이 비활성화되었습니다.</span>';
+            return;
+        }
+
+        sigPreviewDiv.style.opacity = '1';
+        if (!text.trim()) {
+            sigPreviewDiv.innerHTML = '<span style="color: var(--text-secondary); font-style: italic;">작성된 서명이 없습니다. 내용을 입력하세요.</span>';
+        } else {
+            // Check if HTML or plain text
+            const formatted = (text.includes('<') && text.includes('>')) ? text : text.replace(/\n/g, '<br>');
+            sigPreviewDiv.innerHTML = formatted;
+        }
+    }
+
+    if (sigContentTextarea) {
+        sigContentTextarea.addEventListener('input', updateSigPreview);
+    }
+    if (sigUseCheckbox) {
+        sigUseCheckbox.addEventListener('change', updateSigPreview);
+    }
+
+    if (btnManageSignature && signatureModal) {
+        btnManageSignature.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (state.user) {
+                sigUseCheckbox.checked = !!state.user.use_signature;
+                sigContentTextarea.value = state.user.signature || '';
+            }
+            updateSigPreview();
+            signatureModal.classList.remove('hidden');
+        });
+    }
+
+    if (btnCloseSignature && signatureModal) {
+        btnCloseSignature.addEventListener('click', () => {
+            signatureModal.classList.add('hidden');
+        });
+    }
+
+    if (formSignature && signatureModal) {
+        formSignature.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const use_signature = sigUseCheckbox.checked ? 1 : 0;
+            const signature = sigContentTextarea.value;
+
+            showToast('서명을 저장하는 중...');
+            const res = await apiRequest('update_signature', 'POST', { use_signature, signature });
+            showToast(res.message);
+            if (res.success) {
+                if (state.user) {
+                    state.user.use_signature = use_signature;
+                    state.user.signature = signature;
+                }
+                signatureModal.classList.add('hidden');
+            }
+        });
+    }
+
+    setupClickOutside(signatureModal);
 
     // --------------------------------------------------
     // EXTERNAL MAIL CONFIGURATION SCREEN UI
@@ -3211,7 +3837,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dispUsername = isOnto ? (acc.mail_username.includes('@') ? acc.mail_username.split('@')[0] : acc.mail_username) : (acc ? acc.mail_username : '');
         
         let headerTitle = isNew ? '새 메일 계정 추가' : `${escapeHtml(getServiceLabel(acc.service_type))} 설정`;
-        if (isOnto) headerTitle = 'OnTo 기본 메일 설정 (읽기 전용)';
+        if (isOnto) headerTitle = 'OnTo 기본 메일 설정';
 
         // 10 theme colors
         const colorList = [
@@ -3392,6 +4018,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `}
 
+                ${isOnto ? '' : `
                 <div class="btn-row">
                     <div>
                         ${(!isNew && !isOnto) ? `
@@ -3404,10 +4031,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         <i class="fa-solid fa-check"></i> ${isNew ? '추가 완료' : '설정 저장'}
                     </button>
                 </div>
+                `}
             </form>
         `;
 
         externalMailDetailPane.innerHTML = html;
+        const formDetail = externalMailDetailPane.querySelector('#form-external-mail-detail');
         externalMailDetailPane.scrollTop = 0;
         setTimeout(() => {
             externalMailDetailPane.scrollTop = 0;
@@ -3419,9 +4048,23 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', () => {
                 colorBtns.forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
-                if (colorInput) colorInput.value = btn.dataset.color;
+                if (colorInput) {
+                    colorInput.value = btn.dataset.color;
+                    // OnTo Mail saves color immediately
+                    if (isOnto && formDetail) {
+                        formDetail.requestSubmit();
+                    }
+                }
             });
         });
+
+        // Immediate activation toggle save
+        const toggleActive = externalMailDetailPane.querySelector('#detail-is-active');
+        if (toggleActive && !isNew) {
+            toggleActive.addEventListener('change', () => {
+                if (formDetail) formDetail.requestSubmit();
+            });
+        }
 
         const serviceSelect = externalMailDetailPane.querySelector('#detail-service-type');
         const customServerSettings = externalMailDetailPane.querySelector('#custom-server-settings');
@@ -3465,7 +4108,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        const formDetail = externalMailDetailPane.querySelector('#form-external-mail-detail');
         if (formDetail) {
             formDetail.addEventListener('submit', async (e) => {
                 e.preventDefault();
@@ -3856,11 +4498,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             targetHeight = headerHeight + theadHeight + itemsHeight + 4;
         } else {
-            const emptyMsg = mailListPane.querySelector('.list-empty');
+            const emptyMsg = mailListPane.querySelector('.list-empty') || mailListPane.querySelector('.mail-list-empty-overlay');
             if (emptyMsg) {
                 targetHeight = headerHeight + emptyMsg.offsetHeight + 10;
             } else {
-                targetHeight = headerHeight + 50;
+                targetHeight = headerHeight + 160; // minimum height when empty overlay is not yet layouted
             }
         }
         

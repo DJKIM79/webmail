@@ -11,6 +11,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="cropper.min.css?v=<?php echo filemtime('cropper.min.css'); ?>">
     <link rel="stylesheet" href="app.css?v=<?php echo filemtime('app.css'); ?>">
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
     <link rel="icon" type="image/x-icon" href="onto.ico">
 </head>
 <body>
@@ -40,18 +42,22 @@
                 <a href="#" class="nav-item" data-folder="Starred">
                     <i class="fa-solid fa-star" style="color: var(--color-warning, #f59e0b);"></i>
                     <span class="nav-label">즐겨찾기</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Sent">
                     <i class="fa-solid fa-paper-plane"></i>
                     <span class="nav-label">보낸 편지함</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Drafts">
                     <i class="fa-solid fa-file-signature"></i>
                     <span class="nav-label">임시 보관함</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Trash">
                     <i class="fa-solid fa-trash-can"></i>
                     <span class="nav-label">휴지통</span>
+                    <span class="badge" style="display:none;">0</span>
                 </a>
 
                 <!-- Collapsible Tags Menu -->
@@ -60,6 +66,7 @@
                         <i class="fa-solid fa-box-archive"></i>
                         <span class="nav-label">개인 보관함</span>
                         <i class="fa-solid fa-caret-down arrow-icon" id="tags-menu-arrow"></i>
+                        <span class="badge" id="badge-tags-combined" style="display:none;">0</span>
                     </div>
                     
                     <!-- 접힌 상태에서 개인 보관함 클릭시 뜨는 풍선도움말 팝오버 -->
@@ -150,7 +157,7 @@
                             <button id="btn-reply" class="btn-action"><i class="fa-solid fa-reply"></i> 답장</button>
                             <button id="btn-forward" class="btn-action"><i class="fa-solid fa-share"></i> 전달</button>
                             <div class="dropdown-tag-move">
-                                <button id="btn-move-tag" class="btn-action"><i class="fa-solid fa-box-archive"></i> 보관함 이동 <i class="fa-solid fa-caret-down"></i></button>
+                                <button id="btn-move-tag" class="btn-action"><i class="fa-solid fa-box-archive"></i> 이동 <i class="fa-solid fa-caret-down"></i></button>
                                 <div id="tag-move-dropdown-list" class="dropdown-content hidden">
                                     <!-- Dynamic tag list dropdown -->
                                 </div>
@@ -275,8 +282,182 @@
                     <label for="mail-subject">제목</label>
                     <input type="text" id="mail-subject" name="subject" placeholder="메일 제목 입력" required>
                 </div>
-                <div class="compose-body">
-                    <textarea id="mail-body" name="body" placeholder="여기에 메일 내용을 작성하세요..." required></textarea>
+                <div class="compose-body" style="display: flex; flex-direction: column; position: relative; padding: 0;">
+                    <textarea id="mail-body" name="body" class="hidden"></textarea>
+                    <div id="quill-container" style="flex-grow: 1; display: flex; flex-direction: column; border-radius: 0; overflow: visible; height: 100%;">
+                        <!-- Custom Formatting Toolbar Container -->
+                        <div class="custom-toolbar-container">
+                            <button type="button" class="custom-toolbar-nav-btn nav-left hidden" id="custom-toolbar-nav-left" title="왼쪽 스크롤">
+                                <i class="fa-solid fa-angle-left"></i>
+                            </button>
+                            <div id="custom-editor-toolbar" class="custom-toolbar">
+                            <!-- Font select -->
+                            <div class="toolbar-dropdown-wrapper" id="dropdown-font-wrapper">
+                                <button type="button" class="toolbar-dropdown-trigger" id="btn-toolbar-font">
+                                    <span class="trigger-label">기본 폰트</span>
+                                    <i class="fa-solid fa-chevron-down caret-icon"></i>
+                                </button>
+                                <div class="toolbar-dropdown-menu font-menu hidden">
+                                    <button type="button" class="font-item active" data-font="" style="font-family: var(--font-sans);">기본 폰트</button>
+                                    <button type="button" class="font-item" data-font="malgungothic" style="font-family: 'Malgun Gothic', '맑은 고딕', sans-serif;">맑은 고딕</button>
+                                    <button type="button" class="font-item" data-font="dotum" style="font-family: 'Dotum', '돋움', sans-serif;">돋움</button>
+                                    <button type="button" class="font-item" data-font="gulim" style="font-family: 'Gulim', '굴림', sans-serif;">굴림</button>
+                                    <button type="button" class="font-item" data-font="batang" style="font-family: 'Batang', '바탕', serif;">바탕</button>
+                                    <button type="button" class="font-item" data-font="gungsuh" style="font-family: 'Gungsuh', '궁서', serif;">궁서</button>
+                                </div>
+                            </div>
+
+                            <!-- Size select -->
+                            <div class="toolbar-dropdown-wrapper" id="dropdown-size-wrapper">
+                                <button type="button" class="toolbar-dropdown-trigger" id="btn-toolbar-size">
+                                    <span class="trigger-label">보통</span>
+                                    <i class="fa-solid fa-chevron-down caret-icon"></i>
+                                </button>
+                                <div class="toolbar-dropdown-menu size-menu hidden">
+                                    <button type="button" class="size-item" data-size="small" style="font-size: 11px;">작게</button>
+                                    <button type="button" class="size-item active" data-size="">보통</button>
+                                    <button type="button" class="size-item" data-size="large" style="font-size: 16px;">크게</button>
+                                    <button type="button" class="size-item" data-size="huge" style="font-size: 20px;">아주 크게</button>
+                                </div>
+                            </div>
+
+                            <div class="toolbar-separator"></div>
+
+                            <!-- Text Styles -->
+                            <div class="toolbar-btn-group">
+                                <button type="button" class="toolbar-btn" data-format="bold" title="굵게 (Ctrl+B)">
+                                    <i class="fa-solid fa-bold"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-format="italic" title="기울임 (Ctrl+I)">
+                                    <i class="fa-solid fa-italic"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-format="underline" title="밑줄 (Ctrl+U)">
+                                    <i class="fa-solid fa-underline"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-format="strike" title="취소선">
+                                    <i class="fa-solid fa-strikethrough"></i>
+                                </button>
+                            </div>
+
+                            <div class="toolbar-separator"></div>
+
+                            <!-- Colors -->
+                            <div class="toolbar-btn-group">
+                                <!-- Text Color -->
+                                <div class="toolbar-dropdown-wrapper" id="dropdown-color-wrapper">
+                                    <button type="button" class="toolbar-btn has-indicator" id="btn-toolbar-color" title="글자 색상">
+                                        <i class="fa-solid fa-font"></i>
+                                        <span class="color-indicator text-indicator" id="indicator-text-color"></span>
+                                    </button>
+                                    <div class="toolbar-dropdown-menu color-menu hidden">
+                                        <div class="color-palette-title">글자 색상</div>
+                                        <div class="color-palette-grid">
+                                            <button type="button" class="color-dot active" data-color="#f3f4f6" style="background-color: #f3f4f6;" title="기본"></button>
+                                            <button type="button" class="color-dot" data-color="#111827" style="background-color: #111827;" title="검정"></button>
+                                            <button type="button" class="color-dot" data-color="#ef4444" style="background-color: #ef4444;" title="빨강"></button>
+                                            <button type="button" class="color-dot" data-color="#f97316" style="background-color: #f97316;" title="주황"></button>
+                                            <button type="button" class="color-dot" data-color="#f59e0b" style="background-color: #f59e0b;" title="노랑"></button>
+                                            <button type="button" class="color-dot" data-color="#10b981" style="background-color: #10b981;" title="초록"></button>
+                                            <button type="button" class="color-dot" data-color="#3b82f6" style="background-color: #3b82f6;" title="파랑"></button>
+                                            <button type="button" class="color-dot" data-color="#6366f1" style="background-color: #6366f1;" title="남색"></button>
+                                            <button type="button" class="color-dot" data-color="#8b5cf6" style="background-color: #8b5cf6;" title="보라"></button>
+                                            <button type="button" class="color-dot" data-color="#ec4899" style="background-color: #ec4899;" title="분홍"></button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Background/Highlight Color -->
+                                <div class="toolbar-dropdown-wrapper" id="dropdown-bg-wrapper">
+                                    <button type="button" class="toolbar-btn has-indicator" id="btn-toolbar-bg" title="배경 형광펜">
+                                        <i class="fa-solid fa-highlighter"></i>
+                                        <span class="color-indicator bg-indicator" id="indicator-bg-color"></span>
+                                    </button>
+                                    <div class="toolbar-dropdown-menu color-menu hidden">
+                                        <div class="color-palette-title">형광펜 배경</div>
+                                        <div class="color-palette-grid">
+                                            <button type="button" class="color-dot active transparent-dot" data-bg="transparent" title="없음">
+                                                <i class="fa-solid fa-ban"></i>
+                                            </button>
+                                            <button type="button" class="color-dot" data-bg="#fee2e2" style="background-color: #fee2e2;" title="연빨강"></button>
+                                            <button type="button" class="color-dot" data-bg="#ffedd5" style="background-color: #ffedd5;" title="연주황"></button>
+                                            <button type="button" class="color-dot" data-bg="#fef3c7" style="background-color: #fef3c7;" title="연노랑"></button>
+                                            <button type="button" class="color-dot" data-bg="#d1fae5" style="background-color: #d1fae5;" title="연초록"></button>
+                                            <button type="button" class="color-dot" data-bg="#dbeafe" style="background-color: #dbeafe;" title="연파랑"></button>
+                                            <button type="button" class="color-dot" data-bg="#e0e7ff" style="background-color: #e0e7ff;" title="연남색"></button>
+                                            <button type="button" class="color-dot" data-bg="#ede9fe" style="background-color: #ede9fe;" title="연보라"></button>
+                                            <button type="button" class="color-dot" data-bg="#fae8ff" style="background-color: #fae8ff;" title="연분홍"></button>
+                                            <button type="button" class="color-dot" data-bg="#f3f4f6" style="background-color: #f3f4f6;" title="회색"></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="toolbar-separator"></div>
+
+                            <!-- Alignment -->
+                            <div class="toolbar-btn-group">
+                                <button type="button" class="toolbar-btn" data-align="" title="왼쪽 정렬">
+                                    <i class="fa-solid fa-align-left"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-align="center" title="가운데 정렬">
+                                    <i class="fa-solid fa-align-center"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-align="right" title="오른쪽 정렬">
+                                    <i class="fa-solid fa-align-right"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-align="justify" title="양쪽 정렬">
+                                    <i class="fa-solid fa-align-justify"></i>
+                                </button>
+                            </div>
+
+                            <div class="toolbar-separator"></div>
+
+                            <!-- Lists -->
+                            <div class="toolbar-btn-group">
+                                <button type="button" class="toolbar-btn" data-list="bullet" title="글머리 기호">
+                                    <i class="fa-solid fa-list-ul"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-list="ordered" title="번호 매기기">
+                                    <i class="fa-solid fa-list-ol"></i>
+                                </button>
+                            </div>
+
+                            <div class="toolbar-separator"></div>
+
+                            <!-- Inserts -->
+                            <div class="toolbar-btn-group">
+                                <button type="button" class="toolbar-btn" data-insert="link" title="링크 삽입">
+                                    <i class="fa-solid fa-link"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-insert="image" title="이미지 삽입">
+                                    <i class="fa-solid fa-image"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-insert="table" title="표 삽입 (2x2)">
+                                    <i class="fa-solid fa-table"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-insert="blockquote" title="인용구">
+                                    <i class="fa-solid fa-quote-left"></i>
+                                </button>
+                                <button type="button" class="toolbar-btn" data-insert="code-block" title="코드 블록">
+                                    <i class="fa-solid fa-code"></i>
+                                </button>
+                            </div>
+
+                            <div class="toolbar-separator"></div>
+
+                            <!-- Clear -->
+                            <button type="button" class="toolbar-btn" id="btn-toolbar-clean" title="서식 지우기">
+                                <i class="fa-solid fa-eraser"></i>
+                            </button>
+                            </div>
+                            <button type="button" class="custom-toolbar-nav-btn nav-right hidden" id="custom-toolbar-nav-right" title="오른쪽 스크롤">
+                                <i class="fa-solid fa-angle-right"></i>
+                            </button>
+                        </div>
+
+                        <!-- Quill Editor -->
+                        <div id="quill-editor" style="flex-grow: 1; min-height: 200px;"></div>
+                    </div>
                 </div>
                 <div class="compose-attachments-zone" id="compose-attachments-zone">
                     <div class="attachments-list" id="attachments-list"></div>
@@ -292,6 +473,18 @@
                     <button type="submit" class="btn-send"><i class="fa-solid fa-paper-plane"></i> 보내기</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- COMPOSE CONFIRM MODAL -->
+    <div id="compose-confirm-modal" class="compose-overlay hidden" style="z-index: 105;">
+        <div class="auth-card" style="padding: 24px; width: 380px; align-items: stretch; justify-content: center;">
+            <div style="font-size: 14px; color: var(--text-primary); margin-bottom: 24px;">
+                메일 작성을 취소하면 작성 중인 내용도 삭제됩니다.
+            </div>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="btn-compose-confirm-delete" class="btn-submit btn-danger-action" style="margin: 0; min-width: auto; padding: 8px 16px;">작성 취소</button>
+            </div>
         </div>
     </div>
 
@@ -630,7 +823,7 @@
 
     <!-- EXTERNAL MAIL SETTINGS MODAL -->
     <div id="external-mail-modal" class="tags-overlay hidden">
-        <div class="tags-card external-mail-card" style="width: 600px; max-height: 85vh; height: 580px;">
+        <div class="tags-card external-mail-card" style="width: 600px; max-height: 85vh; height: 590px;">
             <div class="tags-header" style="flex-shrink: 0;">
                 <h3><i class="fa-solid fa-at"></i> 외부 메일 설정</h3>
             </div>
@@ -643,13 +836,13 @@
                             <i class="fa-solid fa-plus"></i>
                         </button>
                     </div>
-                    <div class="external-mail-accounts-list" id="external-mail-accounts-list" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: scroll; scrollbar-gutter: stable; flex-grow: 1;">
+                    <div class="external-mail-accounts-list no-scrollbar" id="external-mail-accounts-list" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex-grow: 1;">
                         <!-- Dynamic list of external mail accounts -->
                     </div>
                 </div>
                 
                 <!-- 오른쪽 상세 설정 -->
-                <div class="external-mail-detail-pane" id="external-mail-detail-pane" style="flex-grow: 1; display: flex; flex-direction: column; background: rgba(0, 0, 0, 0.05); overflow-y: scroll; scrollbar-gutter: stable; padding: 20px;">
+                <div class="external-mail-detail-pane no-scrollbar" id="external-mail-detail-pane" style="flex-grow: 1; display: flex; flex-direction: column; background: rgba(0, 0, 0, 0.05); overflow-y: auto; padding: 20px;">
                     <div class="detail-placeholder" style="margin: auto; text-align: center; color: var(--text-muted); opacity: 0.6;">
                         <i class="fa-solid fa-envelope-open-text" style="font-size: 48px; margin-bottom: 12px; display: block;"></i>
                         <span>메일 계정을 선택하거나 새 계정을 추가하세요.</span>
@@ -670,6 +863,9 @@
                     </button>
                     <button type="button" id="btn-manage-filters" class="btn-icon-settings" title="메일 필터링">
                         <i class="fa-solid fa-filter"></i>
+                    </button>
+                    <button type="button" id="btn-manage-signature" class="btn-icon-settings" title="서명 설정">
+                        <i class="fa-solid fa-signature"></i>
                     </button>
                     <button type="button" id="btn-manage-external-mail" class="btn-icon-settings" title="외부 메일 설정">
                         <i class="fa-solid fa-at"></i>
@@ -769,6 +965,36 @@
             </div>
             <div class="crop-footer">
                 <button id="btn-apply-crop" class="btn-submit btn-save-settings"><i class="fa-solid fa-check"></i> 자르기 및 적용</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SIGNATURE SETTINGS MODAL -->
+    <div id="signature-modal" class="tags-overlay hidden" style="z-index: 200;">
+        <div class="tags-card" style="width: 480px; max-height: 80vh;">
+            <div class="tags-header">
+                <h3><i class="fa-solid fa-signature"></i> 서명 설정</h3>
+            </div>
+            <div class="tags-body" style="padding: 20px;">
+                <form id="form-signature">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary); user-select: none;">
+                            <input type="checkbox" id="sig-use" name="use_signature" style="width: 16px; height: 16px; margin: 0; padding: 0;">
+                            <span>메일 발송 시 서명 사용</span>
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label for="sig-content" style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">서명 내용 (HTML 코드 및 이미지 태그 지원)</label>
+                        <textarea id="sig-content" name="signature_content" placeholder="메일 끝에 자동으로 추가될 서명을 입력하세요..."></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">서명 미리보기</label>
+                        <div id="sig-preview"></div>
+                    </div>
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button type="submit" class="btn-submit" style="margin: 0; min-width: auto; padding: 8px 20px;">서명 저장</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

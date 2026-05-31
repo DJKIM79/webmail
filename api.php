@@ -67,6 +67,18 @@ try {
     // Ignore error if column already exists
 }
 
+// Alter table to add signature columns if not exists
+try {
+    $db->exec("ALTER TABLE users ADD COLUMN use_signature INTEGER DEFAULT 0");
+} catch (PDOException $e) {
+    // Ignore error if column already exists
+}
+try {
+    $db->exec("ALTER TABLE users ADD COLUMN signature TEXT");
+} catch (PDOException $e) {
+    // Ignore error if column already exists
+}
+
 // Create table groups
 $db->exec("CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -686,7 +698,9 @@ switch ($action) {
                     'name' => $_SESSION['name'],
                     'role' => $_SESSION['role'],
                     'profile_pic' => $user['profile_pic'] ?? null,
-                    'theme' => $user['theme'] ?? 'gray'
+                    'theme' => $user['theme'] ?? 'gray',
+                    'use_signature' => intval($user['use_signature'] ?? 0),
+                    'signature' => $user['signature'] ?? ''
                 ]
             ]);
         } else {
@@ -753,7 +767,9 @@ switch ($action) {
                 'name' => $user['name'],
                 'role' => $user['role'],
                 'profile_pic' => $user['profile_pic'] ?? null,
-                'theme' => $user['theme'] ?? 'gray'
+                'theme' => $user['theme'] ?? 'gray',
+                'use_signature' => intval($user['use_signature'] ?? 0),
+                'signature' => $user['signature'] ?? ''
             ]
         ]);
         break;
@@ -831,6 +847,99 @@ switch ($action) {
         mail($admin_email, "=?UTF-8?B?" . base64_encode($subject) . "?=", $email_body, $headers, "-f webmaster@onto.kr");
         
         respond(true, '가입 신청이 완료되었습니다. 관리자 승인 후 로그인 가능합니다.');
+        break;
+
+    case 'get_unread_counts':
+        check_auth();
+        $username = $_SESSION['username'];
+        
+        $counts = [];
+        
+        // 1. Get custom tags/folders
+        $tags = [];
+        $cmd = "sudo /usr/local/bin/manage_mail_files.sh list_tags " . escapeshellarg($username);
+        exec($cmd, $output, $return_var);
+        if ($return_var === 0) {
+            foreach ($output as $line) {
+                $line = trim($line);
+                if ($line === '' || $line === '.' || $line === '..') continue;
+                if ($line[0] === '.') {
+                    $tag_name = substr($line, 1);
+                    if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts'], true)) {
+                        $tags[] = $tag_name;
+                    }
+                }
+            }
+        }
+        
+        $folders_to_check = array_merge(['INBOX', 'Sent', 'Drafts', 'Trash'], $tags);
+        
+        $local_inbox_unread = 0;
+        $starred_unread = 0;
+        
+        foreach ($folders_to_check as $f) {
+            $new_dir = ($f === 'INBOX') ? 'new' : '.' . $f . '/new';
+            $cur_dir = ($f === 'INBOX') ? 'cur' : '.' . $f . '/cur';
+            
+            $unread = 0;
+            $new_files = secure_list_files($username, $new_dir);
+            foreach ($new_files as $file) {
+                $unread++;
+                $parts = explode(':2,', $file);
+                $flags = (count($parts) > 1) ? $parts[1] : '';
+                if (strpos($flags, 'F') !== false) {
+                    $starred_unread++;
+                }
+            }
+            
+            $cur_files = secure_list_files($username, $cur_dir);
+            foreach ($cur_files as $file) {
+                $parts = explode(':2,', $file);
+                $flags = (count($parts) > 1) ? $parts[1] : '';
+                $is_seen = (strpos($flags, 'S') !== false);
+                $is_flagged = (strpos($flags, 'F') !== false);
+                if (!$is_seen) {
+                    $unread++;
+                    if ($is_flagged) {
+                        $starred_unread++;
+                    }
+                }
+            }
+            
+            if ($f === 'INBOX') {
+                $local_inbox_unread = $unread;
+            }
+            
+            if ($unread > 0) {
+                $counts[$f] = $unread;
+            }
+        }
+        
+        if ($starred_unread > 0) {
+            $counts['Starred'] = $starred_unread;
+        }
+        
+        // 2. Check external accounts
+        $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE username = :username AND is_active = 1");
+        $stmt->execute([':username' => $username]);
+        $active_accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $total_unified_unread = $local_inbox_unread;
+        
+        if (count($active_accounts) > 1) {
+            foreach ($active_accounts as $account) {
+                if ($account['service_type'] !== 'onto') {
+                    $ext_folder = 'ext_' . $account['id'] . '_INBOX';
+                    $counts[$ext_folder] = 1; // mock unread email
+                    $total_unified_unread += 1;
+                }
+            }
+            if ($total_unified_unread > 0) {
+                $counts['unified_inbox'] = $total_unified_unread;
+            }
+        }
+        
+        respond(true, '성공', ['unread_counts' => $counts]);
         break;
 
     case 'list_emails':
@@ -1201,12 +1310,23 @@ switch ($action) {
         $message = "--$mixed_boundary\r\n";
         $message .= "Content-Type: multipart/alternative; boundary=\"$alt_boundary\"\r\n\r\n";
         
+        $is_html = isset($_POST['is_html']) && $_POST['is_html'] == '1';
+
         $message .= "--$alt_boundary\r\n";
         $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
         $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
-        $message .= chunk_split(base64_encode($body)) . "\r\n";
-        
-        $html_body = nl2br(htmlspecialchars($body));
+
+        if ($is_html) {
+            // Very simple HTML to text conversion for the plain text part
+            $plain_text = strip_tags(str_replace(['<br>', '<br/>', '<br />', '</p>'], "\n", $body));
+            $plain_text = html_entity_decode($plain_text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $message .= chunk_split(base64_encode($plain_text)) . "\r\n";
+            $html_body = $body;
+        } else {
+            $message .= chunk_split(base64_encode($body)) . "\r\n";
+            $html_body = nl2br(htmlspecialchars($body));
+        }
+
         $message .= "--$alt_boundary\r\n";
         $message .= "Content-Type: text/html; charset=UTF-8\r\n";
         $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
@@ -2189,6 +2309,22 @@ switch ($action) {
         $stmt->execute([':theme' => $theme, ':username' => $username]);
         
         respond(true, '테마가 저장되었습니다.');
+        break;
+
+    case 'update_signature':
+        check_auth();
+        $username = $_SESSION['username'];
+        $use_signature = intval($_POST['use_signature'] ?? 0);
+        $signature = $_POST['signature'] ?? '';
+
+        $stmt = $db->prepare("UPDATE users SET use_signature = :use_signature, signature = :signature WHERE username = :username");
+        $stmt->execute([
+            ':use_signature' => $use_signature,
+            ':signature' => $signature,
+            ':username' => $username
+        ]);
+
+        respond(true, '서명이 성공적으로 저장되었습니다.');
         break;
 
     case 'toggle_flag':
