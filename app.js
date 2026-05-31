@@ -1427,7 +1427,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
                     const accountLabel = emailAcc ? (emailAcc.service_type === 'onto' ? 'OnTo' : (emailAcc.service_type === 'naver' ? 'Naver' : (emailAcc.service_type === 'gmail' ? 'Gmail' : (emailAcc.service_type === 'daum' ? 'Daum' : (emailAcc.service_type === 'kakao' ? 'Kakao' : emailAcc.email))))) : '';
 
-                    const allDestinations = ['INBOX', ...(resTags.tags || [])];
+                    const allDestinations = ['INBOX', 'Sent', 'Drafts', ...(resTags.tags || [])];
                     let addedCount = 0;
                     allDestinations.forEach(dest => {
                         let destName = '';
@@ -1449,11 +1449,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const folderColor = emailAcc ? emailAcc.color : destColor;
 
                         // Display format: e.g., '받은 편지함 (OnTo)' or just '받은 편지함'
-                        let displayLabel = '';
-                        if (destName === 'INBOX') {
-                            displayLabel = (activeAccs.length > 1 && accountLabel) ? `받은 편지함 (${accountLabel})` : '받은 편지함';
-                        } else {
-                            displayLabel = (activeAccs.length > 1 && accountLabel) ? `${destName} (${accountLabel})` : destName;
+                        let displayLabel = getFolderDisplayName(destName);
+                        if (activeAccs.length > 1 && accountLabel) {
+                            displayLabel = `${displayLabel} (${accountLabel})`;
                         }
 
                         a.innerHTML = `
@@ -5079,16 +5077,42 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const resTags = await apiRequest('list_tags');
             if (resTags.success) {
-                const dests = ['INBOX', ...(resTags.tags || [])];
+                // Determine account info for labels
+                const targetBase = getBaseId(emailId);
+                const emailInState = state.emails.find(mail => getBaseId(mail.id) === targetBase);
+                const emailAcc = emailInState ? (state.externalMails || []).find(a => a.id == emailInState.account_id || (a.service_type === 'onto' && !emailInState.account_id)) : null;
+                const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
+                
+                let accountLabel = '';
+                if (emailAcc) {
+                    if (emailAcc.service_type === 'onto') {
+                        accountLabel = 'OnTo';
+                    } else {
+                        const serviceType = emailAcc.service_type;
+                        accountLabel = serviceType === 'naver' ? 'Naver' : 
+                                       serviceType === 'gmail' ? 'Gmail' : 
+                                       serviceType === 'daum' ? 'Daum' : 
+                                       serviceType === 'kakao' ? 'Kakao' : 
+                                       (emailAcc.email ? emailAcc.email.split('@')[0] : serviceType);
+                    }
+                }
+
+                const dests = ['INBOX', 'Sent', 'Drafts', ...(resTags.tags || [])];
                 moveList.innerHTML = '';
                 let destCount = 0;
                 
                 dests.forEach(dest => {
-                    if (dest === state.currentFolder) return;
+                    let destName = typeof dest === 'string' ? dest : dest.name;
+                    if (destName === state.currentFolder) return;
                     
                     const div = document.createElement('div');
                     div.className = 'context-submenu-item';
-                    div.textContent = dest === 'INBOX' ? '받은 편지함 (INBOX)' : dest;
+                    
+                    let displayLabel = getFolderDisplayName(destName);
+                    if (activeAccs.length > 1 && accountLabel) {
+                        displayLabel = `${displayLabel} (${accountLabel})`;
+                    }
+                    div.textContent = displayLabel;
                     
                     div.addEventListener('click', async (evt) => {
                         evt.stopPropagation();
@@ -5102,7 +5126,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const rMove = await apiRequest('move_email', 'POST', {
                                 id: t.id,
                                 folder: t.folder,
-                                dest_folder: dest
+                                dest_folder: destName
                             });
                             if (rMove.success) successCount++;
                         }
