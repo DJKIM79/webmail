@@ -384,14 +384,14 @@
                                             <button type="button" class="color-dot active transparent-dot" data-bg="transparent" title="없음">
                                                 <i class="fa-solid fa-ban"></i>
                                             </button>
-                                            <button type="button" class="color-dot" data-bg="#fee2e2" style="background-color: #fee2e2;" title="연빨강"></button>
-                                            <button type="button" class="color-dot" data-bg="#ffedd5" style="background-color: #ffedd5;" title="연주황"></button>
-                                            <button type="button" class="color-dot" data-bg="#fef3c7" style="background-color: #fef3c7;" title="연노랑"></button>
-                                            <button type="button" class="color-dot" data-bg="#d1fae5" style="background-color: #d1fae5;" title="연초록"></button>
-                                            <button type="button" class="color-dot" data-bg="#dbeafe" style="background-color: #dbeafe;" title="연파랑"></button>
-                                            <button type="button" class="color-dot" data-bg="#e0e7ff" style="background-color: #e0e7ff;" title="연남색"></button>
-                                            <button type="button" class="color-dot" data-bg="#ede9fe" style="background-color: #ede9fe;" title="연보라"></button>
-                                            <button type="button" class="color-dot" data-bg="#fae8ff" style="background-color: #fae8ff;" title="연분홍"></button>
+                                            <button type="button" class="color-dot" data-bg="#ffcccc" style="background-color: #ffcccc;" title="연빨강"></button>
+                                            <button type="button" class="color-dot" data-bg="#ffe6cc" style="background-color: #ffe6cc;" title="연주황"></button>
+                                            <button type="button" class="color-dot" data-bg="#ffffcc" style="background-color: #ffffcc;" title="연노랑"></button>
+                                            <button type="button" class="color-dot" data-bg="#ccffdd" style="background-color: #ccffdd;" title="연초록"></button>
+                                            <button type="button" class="color-dot" data-bg="#cce6ff" style="background-color: #cce6ff;" title="연파랑"></button>
+                                            <button type="button" class="color-dot" data-bg="#d9e6ff" style="background-color: #d9e6ff;" title="연남색"></button>
+                                            <button type="button" class="color-dot" data-bg="#ece0ff" style="background-color: #ece0ff;" title="연보라"></button>
+                                            <button type="button" class="color-dot" data-bg="#ffebff" style="background-color: #ffebff;" title="연분홍"></button>
                                             <button type="button" class="color-dot" data-bg="#f3f4f6" style="background-color: #f3f4f6;" title="회색"></button>
                                         </div>
                                     </div>
@@ -438,9 +438,16 @@
                                 <button type="button" class="toolbar-btn" data-insert="image" title="이미지 삽입">
                                     <i class="fa-solid fa-image"></i>
                                 </button>
-                                <button type="button" class="toolbar-btn" data-insert="table" title="표 삽입 (2x2)">
-                                    <i class="fa-solid fa-table"></i>
-                                </button>
+                                <div class="toolbar-dropdown-wrapper" id="dropdown-table-wrapper">
+                                    <button type="button" class="toolbar-btn" data-insert="table" title="표 삽입">
+                                        <i class="fa-solid fa-table"></i>
+                                    </button>
+                                    <div class="toolbar-dropdown-menu table-menu hidden">
+                                        <div class="table-selector-title">표 삽입</div>
+                                        <div class="table-selector-grid" id="table-selector-grid"></div>
+                                        <div class="table-selector-info" id="table-selector-info">0 x 0</div>
+                                    </div>
+                                </div>
                                 <button type="button" class="toolbar-btn" data-insert="blockquote" title="인용구">
                                     <i class="fa-solid fa-quote-left"></i>
                                 </button>

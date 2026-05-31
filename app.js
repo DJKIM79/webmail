@@ -2024,15 +2024,64 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Insert Table handler
-        const insertTableBtn = toolbar.querySelector('.toolbar-btn[data-insert="table"]');
-        if (insertTableBtn) {
-            insertTableBtn.addEventListener('click', () => {
-                const tableModule = editor.getModule('table');
-                if (tableModule) {
-                    tableModule.insertTable(2, 2);
-                } else {
-                    console.error('Table module not enabled in Quill');
+        // Insert Table handler (Custom Grid Selector)
+        const tableGrid = toolbar.querySelector('#table-selector-grid');
+        const tableInfo = toolbar.querySelector('#table-selector-info');
+        if (tableGrid) {
+            // Generate 10x10 Grid
+            for (let r = 1; r <= 10; r++) {
+                for (let c = 1; c <= 10; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'table-selector-cell';
+                    cell.setAttribute('data-row', r);
+                    cell.setAttribute('data-col', c);
+                    tableGrid.appendChild(cell);
+                }
+            }
+
+            const cells = tableGrid.querySelectorAll('.table-selector-cell');
+
+            tableGrid.addEventListener('mousemove', (e) => {
+                const target = e.target.closest('.table-selector-cell');
+                if (target) {
+                    const maxRow = parseInt(target.getAttribute('data-row'), 10);
+                    const maxCol = parseInt(target.getAttribute('data-col'), 10);
+
+                    cells.forEach(cell => {
+                        const r = parseInt(cell.getAttribute('data-row'), 10);
+                        const c = parseInt(cell.getAttribute('data-col'), 10);
+                        if (r <= maxRow && c <= maxCol) {
+                            cell.classList.add('highlighted');
+                        } else {
+                            cell.classList.remove('highlighted');
+                        }
+                    });
+
+                    if (tableInfo) {
+                        tableInfo.textContent = `${maxCol} x ${maxRow}`;
+                    }
+                }
+            });
+
+            tableGrid.addEventListener('mouseleave', () => {
+                cells.forEach(cell => cell.classList.remove('highlighted'));
+                if (tableInfo) {
+                    tableInfo.textContent = '0 x 0';
+                }
+            });
+
+            tableGrid.addEventListener('click', (e) => {
+                const target = e.target.closest('.table-selector-cell');
+                if (target) {
+                    const row = parseInt(target.getAttribute('data-row'), 10);
+                    const col = parseInt(target.getAttribute('data-col'), 10);
+                    const tableModule = editor.getModule('table');
+                    if (tableModule) {
+                        tableModule.insertTable(row, col);
+                    } else {
+                        console.error('Table module not enabled in Quill');
+                    }
+                    closeAllDropdowns();
                 }
             });
         }
