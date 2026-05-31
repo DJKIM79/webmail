@@ -1712,6 +1712,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!attachmentsList) return;
         attachmentsList.innerHTML = '';
         
+        if (uploadedFiles.length === 0) {
+            attachmentsList.style.display = 'none';
+        } else {
+            attachmentsList.style.display = 'flex';
+        }
+
         uploadedFiles.forEach((file, index) => {
             const item = document.createElement('div');
             item.className = 'attachment-item';
@@ -2169,7 +2175,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Update Size dropdown label & active class
-            const currentSize = formats.size || '';
+            const currentSize = formats.size || '11pt';
             const sizeLabel = toolbar.querySelector('#btn-toolbar-size .trigger-label');
             if (sizeLabel) {
                 const activeSizeItem = toolbar.querySelector(`.size-item[data-size="${currentSize}"]`);
@@ -2178,7 +2184,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     activeSizeItem.classList.add('active');
                     sizeLabel.textContent = activeSizeItem.textContent;
                 } else {
-                    sizeLabel.textContent = '보통';
+                    sizeLabel.textContent = currentSize;
                 }
             }
 
@@ -2217,8 +2223,32 @@ document.addEventListener('DOMContentLoaded', () => {
         updateToolbarState();
     }
 
-    function openCompose(to = '', subject = '', body = '') {
-        formCompose.to.value = to;
+    function openCompose(to = '', subject = '', body = '', cc = '') {
+        // Clear existing tags
+        if (mailToContainer) {
+            mailToContainer.querySelectorAll('.email-tag').forEach(t => t.remove());
+            updatePlaceholder(mailToContainer);
+        }
+        if (mailCcContainer) {
+            mailCcContainer.querySelectorAll('.email-tag').forEach(t => t.remove());
+            updatePlaceholder(mailCcContainer);
+        }
+
+        if (to) {
+            to.split(',').forEach(email => {
+                const trimmed = email.trim();
+                if (trimmed) addEmailTag(mailToContainer, trimmed);
+            });
+        }
+        if (cc) {
+            cc.split(',').forEach(email => {
+                const trimmed = email.trim();
+                if (trimmed) addEmailTag(mailCcContainer, trimmed);
+            });
+        }
+
+        formCompose.to.value = ''; // Clear text input
+        formCompose.cc.value = ''; // Clear text input
         formCompose.subject.value = subject;
         formCompose.body.value = body; // used as fallback or internal state
         uploadedFiles = [];
@@ -2229,6 +2259,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const Font = Quill.import('formats/font');
             Font.whitelist = ['', 'malgungothic', 'dotum', 'gulim', 'batang', 'gungsuh'];
             Quill.register(Font, true);
+
+            // Register numeric point sizes for Quill
+            const Size = Quill.import('formats/size');
+            Size.whitelist = ['8pt', '9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '20pt'];
+            Quill.register(Size, true);
 
             quillEditor = new Quill('#quill-editor', {
                 theme: 'snow',
@@ -2292,7 +2327,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     formCompose.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const to = formCompose.to.value;
+        
+        // Collect tags from containers
+        const toEmails = Array.from(mailToContainer.querySelectorAll('.email-tag')).map(t => t.dataset.email);
+        const ccEmails = Array.from(mailCcContainer.querySelectorAll('.email-tag')).map(t => t.dataset.email);
+        
+        // Also check if there's an untagged email in the input
+        const toInputVal = mailToInput.value.trim();
+        if (toInputVal && validateEmail(toInputVal)) toEmails.push(toInputVal);
+        
+        const ccInputVal = mailCcInput.value.trim();
+        if (ccInputVal && validateEmail(ccInputVal)) ccEmails.push(ccInputVal);
+
+        if (toEmails.length === 0) {
+            showToast('받는 이 이메일 주소를 입력해주세요.');
+            mailToInput.focus();
+            return;
+        }
+
+        const to = toEmails.join(', ');
+        const cc = ccEmails.join(', ');
         const subject = formCompose.subject.value;
         let body = '';
         
@@ -2308,9 +2362,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const formData = new FormData();
         formData.append('to', to);
+        if (cc) formData.append('cc', cc);
         formData.append('subject', subject);
         formData.append('body', body);
         formData.append('is_html', 1); // Always send as HTML
+
+        // 현재 폴더에서 외부 계정 ID 추출 (ext_{id}_... 형식)
+        const folderMatch = state.currentFolder ? state.currentFolder.match(/^ext_(\d+)_/) : null;
+        if (folderMatch) formData.append('account_id', folderMatch[1]);
+
         uploadedFiles.forEach(file => {
             formData.append('attachments[]', file);
         });
@@ -5451,8 +5511,62 @@ document.addEventListener('DOMContentLoaded', () => {
     const addrTabBtns = document.querySelectorAll('.addr-tab-btn');
     
     const btnAddressbookPopup = document.getElementById('btn-addressbook-popup');
-    const mailToInput = document.getElementById('mail-to');
+    const mailToInput = document.getElementById('mail-to-input');
+    const mailCcInput = document.getElementById('mail-cc-input');
+    const mailToContainer = document.getElementById('mail-to-container');
+    const mailCcContainer = document.getElementById('mail-cc-container');
     const autocompleteList = document.getElementById('autocomplete-list');
+
+    // Email Tagging Helper Functions
+    function validateEmail(email) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+
+    function updatePlaceholder(container) {
+        if (!container) return;
+        const input = container.querySelector('input');
+        if (!input) return;
+        
+        const hasTags = container.querySelectorAll('.email-tag').length > 0;
+        if (hasTags) {
+            if (!input.dataset.placeholder) {
+                input.dataset.placeholder = input.placeholder;
+            }
+            input.placeholder = '';
+        } else {
+            if (input.dataset.placeholder) {
+                input.placeholder = input.dataset.placeholder;
+            }
+        }
+    }
+
+    function addEmailTag(container, email) {
+        email = email.trim();
+        if (!email || !validateEmail(email)) return false;
+        
+        // Prevent duplicates
+        const existingTags = Array.from(container.querySelectorAll('.email-tag')).map(t => t.dataset.email);
+        if (existingTags.includes(email)) return true; // Already exists, considered "handled"
+
+        const tag = document.createElement('div');
+        tag.className = 'email-tag';
+        tag.dataset.email = email;
+        tag.innerHTML = `
+            <span>${email}</span>
+            <span class="tag-remove" title="삭제"><i class="fa-solid fa-xmark"></i></span>
+        `;
+        
+        tag.querySelector('.tag-remove').addEventListener('click', (e) => {
+            e.stopPropagation();
+            tag.remove();
+            updatePlaceholder(container);
+        });
+        
+        const input = container.querySelector('input');
+        container.insertBefore(tag, input);
+        updatePlaceholder(container);
+        return true;
+    }
 
     const btnManageAddrGroups = document.getElementById('btn-manage-addr-groups');
     const addressGroupsModal = document.getElementById('address-groups-modal');
@@ -5498,9 +5612,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnAddressbookConfirm) {
         btnAddressbookConfirm.addEventListener('click', () => {
             const checked = Array.from(addressbookList ? addressbookList.querySelectorAll('.chk-addr-select:checked') : []).map(chk => chk.dataset.email);
-            if (mailToInput) {
-                mailToInput.value = checked.join(', ');
-                mailToInput.dispatchEvent(new Event('input'));
+            if (mailToInput && mailToContainer) {
+                checked.forEach(email => addEmailTag(mailToContainer, email));
+                mailToInput.focus();
             }
             if (addressBookModal) addressBookModal.classList.add('hidden');
         });
@@ -6396,12 +6510,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --------------------------------------------------
-    // RECIPIENT AUTOCOMPLETE (받는 사람 이메일 주소 자동완성)
+    // RECIPIENT AUTOCOMPLETE (받는 이 이메일 주소 자동완성)
     // --------------------------------------------------
     
+    let activeEmailInput = null;
+    let activeEmailContainer = null;
+
     // 이메일 작성 시 자동완성 렌더링 함수
-    function renderAutocomplete(search) {
+    function renderAutocomplete(search, targetInput, targetContainer) {
         if (!autocompleteList) return;
+        activeEmailInput = targetInput;
+        activeEmailContainer = targetContainer;
+
         if (!search) {
             autocompleteList.classList.add('hidden');
             return;
@@ -6473,11 +6593,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (mailToInput) {
-                    const parts = mailToInput.value.split(',');
-                    parts[parts.length - 1] = contact.email;
-                    mailToInput.value = parts.map(p => p.trim()).join(', ') + ', ';
-                    mailToInput.focus();
+                if (activeEmailInput && activeEmailContainer) {
+                    addEmailTag(activeEmailContainer, contact.email);
+                    activeEmailInput.value = '';
+                    activeEmailInput.focus();
                 }
                 autocompleteList.classList.add('hidden');
             });
@@ -6488,22 +6607,62 @@ document.addEventListener('DOMContentLoaded', () => {
         autocompleteList.classList.remove('hidden');
     }
 
-    // 받는 사람 입력창에 입력 이벤트 등록
-    if (mailToInput) {
-        mailToInput.addEventListener('input', (e) => {
-            let value = e.target.value;
-            // 실시간으로 세미콜론(;)을 콤마(,)로 자동 변환하여 사용자 편의성 제공
-            if (value.includes(';')) {
-                value = value.replace(/;/g, ',');
-                e.target.value = value;
-            }
-            const parts = value.split(',');
-            const lastPart = parts[parts.length - 1].trim();
-            renderAutocomplete(lastPart);
+    function setupEmailTagInput(input, container) {
+        if (!input || !container) return;
+
+        container.addEventListener('click', () => {
+            input.focus();
         });
 
-        // 주소록 데이터는 작성 창 포커스 또는 페이지 첫 로드 시 사전 수집하도록 처리
-        mailToInput.addEventListener('focus', () => {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === ',' || e.key === ';' || e.key === 'Enter') {
+                const val = input.value.trim();
+                if (val) {
+                    if (addEmailTag(container, val)) {
+                        e.preventDefault();
+                        input.value = '';
+                        autocompleteList.classList.add('hidden');
+                    } else if (e.key !== 'Enter') {
+                        // Just let the comma/semicolon stay in the input? 
+                        // Actually, if it's invalid, we shouldn't tag it.
+                    }
+                }
+            } else if (e.key === 'Backspace' && !input.value) {
+                const tags = container.querySelectorAll('.email-tag');
+                if (tags.length > 0) {
+                    tags[tags.length - 1].remove();
+                }
+            }
+        });
+
+        input.addEventListener('input', (e) => {
+            let value = e.target.value;
+            if (value.includes(',') || value.includes(';')) {
+                const parts = value.split(/[;,]/);
+                const last = parts.pop();
+                const successfullyTagged = [];
+                const failedTags = [];
+                
+                parts.forEach(p => {
+                    if (addEmailTag(container, p)) {
+                        successfullyTagged.push(p);
+                    } else {
+                        failedTags.push(p);
+                    }
+                });
+                
+                if (failedTags.length > 0) {
+                    // Keep failed ones in the input
+                    e.target.value = failedTags.join(', ') + (last ? ', ' + last : '');
+                } else {
+                    e.target.value = last;
+                }
+                value = e.target.value;
+            }
+            renderAutocomplete(value.trim(), input, container);
+        });
+
+        input.addEventListener('focus', () => {
             // 백그라운드에서 조용히 로딩
             apiRequest('list_address_book').then(myRes => {
                 if (myRes.success) state.addressBookListMy = myRes.address_book || [];
@@ -6513,6 +6672,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
+
+    // 받는 이 및 참조 입력창에 태그 시스템 적용
+    if (mailToInput) setupEmailTagInput(mailToInput, mailToContainer);
+    if (mailCcInput) setupEmailTagInput(mailCcInput, mailCcContainer);
 
     // 바깥 영역 클릭 시 자동완성 닫기
     document.addEventListener('click', (e) => {

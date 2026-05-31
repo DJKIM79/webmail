@@ -275,18 +275,28 @@
             </div>
             <form id="form-compose" class="compose-form">
                 <div class="compose-field">
-                    <label for="mail-to">받는 사람</label>
+                    <label for="mail-to-input">받는 이</label>
                     <div style="display: flex; gap: 8px; flex-grow: 1; align-items: center; position: relative;">
-                        <input type="email" id="mail-to" name="to" placeholder="recipient@example.com" required multiple style="flex-grow: 1; height: 36px; box-sizing: border-box;">
-                        <button type="button" id="btn-addressbook-popup" title="주소록 선택" style="padding: 6px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; white-space: nowrap; width: 36px; height: 36px; box-sizing: border-box;">
+                        <div class="email-tag-container" id="mail-to-container">
+                            <input type="text" id="mail-to-input" name="to" placeholder="받은 사람의 이메일 주소를 입력하세요." style="flex-grow: 1; height: 26px; box-sizing: border-box;">
+                        </div>
+                        <button type="button" id="btn-addressbook-popup" title="주소록 선택" style="padding: 4px 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; white-space: nowrap; width: 30px; height: 30px; box-sizing: border-box;">
                             <i class="fa-solid fa-address-book"></i>
                         </button>
-                        <div id="autocomplete-list" class="autocomplete-items hidden" style="position: absolute; top: 38px; left: 0; width: 320px; max-width: 100%; background: var(--bg-surface-solid); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
+                        <div id="autocomplete-list" class="autocomplete-items hidden" style="position: absolute; top: 32px; left: 0; width: 320px; max-width: 100%; background: var(--bg-surface-solid); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
+                    </div>
+                </div>
+                <div class="compose-field">
+                    <label for="mail-cc-input">참조</label>
+                    <div style="display: flex; gap: 8px; flex-grow: 1; align-items: center; position: relative;">
+                        <div class="email-tag-container" id="mail-cc-container">
+                            <input type="text" id="mail-cc-input" name="cc" placeholder="참조할 사람의 이메일 주소를 입력하세요." style="flex-grow: 1; height: 26px; box-sizing: border-box;">
+                        </div>
                     </div>
                 </div>
                 <div class="compose-field">
                     <label for="mail-subject">제목</label>
-                    <input type="text" id="mail-subject" name="subject" placeholder="메일 제목 입력" required>
+                    <input type="text" id="mail-subject" name="subject" placeholder="메일 제목 입력" required style="height: 26px;">
                 </div>
                 <div class="compose-body" style="display: flex; flex-direction: column; position: relative; padding: 0;">
                     <textarea id="mail-body" name="body" class="hidden"></textarea>
@@ -316,14 +326,18 @@
                             <!-- Size select -->
                             <div class="toolbar-dropdown-wrapper" id="dropdown-size-wrapper">
                                 <button type="button" class="toolbar-dropdown-trigger" id="btn-toolbar-size">
-                                    <span class="trigger-label">보통</span>
+                                    <span class="trigger-label">11pt</span>
                                     <i class="fa-solid fa-chevron-down caret-icon"></i>
                                 </button>
                                 <div class="toolbar-dropdown-menu size-menu hidden">
-                                    <button type="button" class="size-item" data-size="small" style="font-size: 11px;">작게</button>
-                                    <button type="button" class="size-item active" data-size="">보통</button>
-                                    <button type="button" class="size-item" data-size="large" style="font-size: 16px;">크게</button>
-                                    <button type="button" class="size-item" data-size="huge" style="font-size: 20px;">아주 크게</button>
+                                    <button type="button" class="size-item" data-size="8pt" style="font-size: 8pt;">8pt</button>
+                                    <button type="button" class="size-item" data-size="9pt" style="font-size: 9pt;">9pt</button>
+                                    <button type="button" class="size-item" data-size="10pt" style="font-size: 10pt;">10pt</button>
+                                    <button type="button" class="size-item active" data-size="11pt" style="font-size: 11pt;">11pt</button>
+                                    <button type="button" class="size-item" data-size="12pt" style="font-size: 12pt;">12pt</button>
+                                    <button type="button" class="size-item" data-size="14pt" style="font-size: 14pt;">14pt</button>
+                                    <button type="button" class="size-item" data-size="16pt" style="font-size: 16pt;">16pt</button>
+                                    <button type="button" class="size-item" data-size="20pt" style="font-size: 20pt;">20pt</button>
                                 </div>
                             </div>
 
@@ -473,7 +487,7 @@
                     </div>
                 </div>
                 <div class="compose-attachments-zone" id="compose-attachments-zone">
-                    <div class="attachments-list" id="attachments-list"></div>
+                    <div class="attachments-list" id="attachments-list" style="display: none;"></div>
                     <div class="attachments-upload-btn-row">
                         <label for="file-attachments" class="btn-attach-label">
                             <i class="fa-solid fa-paperclip"></i> 파일 첨부

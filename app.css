@@ -1080,6 +1080,17 @@ body.theme-white .btn-submit.btn-danger-action:hover {
     left: 24px !important;
 }
 
+#mail-subject:focus::placeholder,
+#mail-to-input:focus::placeholder,
+#mail-cc-input:focus::placeholder {
+    color: transparent !important;
+}
+
+/* Hide placeholder immediately when focused to avoid IME lag (especially for Korean) */
+.ql-editor.ql-blank:focus::before {
+    display: none !important;
+}
+
 /* Custom Fonts for Quill */
 .ql-font-malgungothic { font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; }
 .ql-font-dotum { font-family: 'Dotum', '돋움', sans-serif; }
@@ -1559,17 +1570,18 @@ body.theme-white .table-selector-info {
 }
 
 .compose-field {
-    padding: 12px 24px;
+    padding: 3px 24px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     gap: 12px;
+    min-height: 34px;
 }
 
 .compose-field label {
     font-size: 13px;
     color: var(--text-secondary);
-    width: 80px;
+    width: 60px;
     font-weight: 500;
 }
 
@@ -1580,6 +1592,66 @@ body.theme-white .table-selector-info {
     color: var(--text-primary);
     font-size: 13px;
     outline: none;
+}
+
+/* Email Tagging System Styles */
+.email-tag-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex-grow: 1;
+    align-items: center;
+    background: transparent;
+    cursor: text;
+    padding: 2px 0;
+}
+
+.email-tag {
+    background: var(--bg-active);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 1px 10px;
+    border-radius: 14px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    animation: tagAppear 0.2s cubic-bezier(0, 0, 0.2, 1);
+}
+
+@keyframes tagAppear {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.email-tag .tag-remove {
+    cursor: pointer;
+    opacity: 0.5;
+    font-size: 10px;
+    transition: opacity 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+}
+
+.email-tag .tag-remove:hover {
+    opacity: 1;
+    background: rgba(0,0,0,0.1);
+}
+
+.email-tag-container input {
+    border: none !important;
+    outline: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex-grow: 1 !important;
+    min-width: 80px;
+    height: 26px !important;
 }
 
 .compose-body {
@@ -4359,21 +4431,6 @@ body.theme-white .btn-close-modal:hover {
     gap: 12px;
 }
 
-.btn-attach-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    background: var(--bg-active);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    cursor: pointer;
-    font-weight: 500;
-    transition: all var(--transition-fast) ease;
-}
-
 .btn-attach-label:hover {
     background: var(--bg-hover);
     border-color: var(--color-primary);
@@ -4550,6 +4607,7 @@ body.theme-white .btn-close-modal:hover {
     color: var(--text-primary) !important;
     font-size: 12px !important;
     font-weight: 600 !important;
+    line-height: 1 !important;
     cursor: pointer !important;
     transition: all var(--transition-fast) ease !important;
 }
@@ -5751,8 +5809,19 @@ body.theme-white .compose-field input {
 }
 
 body.theme-white .compose-field input::placeholder,
-body.theme-white .compose-body textarea::placeholder {
+body.theme-white .compose-body textarea::placeholder,
+body.theme-white .email-tag-container input::placeholder {
     color: #94a3b8 !important;
+}
+
+body.theme-white .email-tag {
+    background: #f1f5f9 !important;
+    border-color: #e2e8f0 !important;
+    color: #1e293b !important;
+}
+
+body.theme-white .email-tag .tag-remove:hover {
+    background: rgba(0,0,0,0.05) !important;
 }
 
 body.theme-white .compose-body textarea {

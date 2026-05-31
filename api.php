@@ -1318,92 +1318,281 @@ switch ($action) {
 
     case 'send_email':
         check_auth();
-        $username = $_SESSION['username'];
-        $to = trim($_POST['to'] ?? '');
-        $subject = trim($_POST['subject'] ?? '');
-        $body = $_POST['body'] ?? '';
-        
+        $username   = $_SESSION['username'];
+        $to         = trim($_POST['to'] ?? '');
+        $subject    = trim($_POST['subject'] ?? '');
+        $body       = $_POST['body'] ?? '';
+        $cc         = trim($_POST['cc'] ?? '');
+        $is_html    = isset($_POST['is_html']) && $_POST['is_html'] == '1';
+        $account_id = intval($_POST['account_id'] ?? 0);
+
         if (empty($to) || empty($subject) || empty($body)) {
-            respond(false, '받는 사람, 제목, 내용을 모두 입력해주세요.');
+            respond(false, '받는 이, 제목, 내용을 모두 입력해주세요.');
         }
-        
-        $from = $username . '@onto.kr';
-        
-        $mixed_boundary = "----=_Mixed_Part_" . md5(uniqid((string)rand(), true));
-        $alt_boundary = "----=_Alt_Part_" . md5(uniqid((string)rand(), true));
-        
-        $headers = "From: $from\r\n";
-        $headers .= "Reply-To: $from\r\n";
-        $headers .= "MIME-Version: 1.0\r\n";
-        $headers .= "Content-Type: multipart/mixed; boundary=\"$mixed_boundary\"\r\n";
-        
-        $encoded_subject = "=?UTF-8?B?" . base64_encode($subject) . "?=";
-        
-        $message = "--$mixed_boundary\r\n";
-        $message .= "Content-Type: multipart/alternative; boundary=\"$alt_boundary\"\r\n\r\n";
-        
-        $is_html = isset($_POST['is_html']) && $_POST['is_html'] == '1';
 
-        $message .= "--$alt_boundary\r\n";
-        $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
-
+        // ── 공통 본문 처리 ─────────────────────────────────
         if ($is_html) {
-            // Very simple HTML to text conversion for the plain text part
             $plain_text = strip_tags(str_replace(['<br>', '<br/>', '<br />', '</p>'], "\n", $body));
             $plain_text = html_entity_decode($plain_text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $message .= chunk_split(base64_encode($plain_text)) . "\r\n";
-            $html_body = $body;
+            $html_body  = $body;
         } else {
-            $message .= chunk_split(base64_encode($body)) . "\r\n";
-            $html_body = nl2br(htmlspecialchars($body));
+            $plain_text = $body;
+            $html_body  = nl2br(htmlspecialchars($body));
         }
 
-        $message .= "--$alt_boundary\r\n";
-        $message .= "Content-Type: text/html; charset=UTF-8\r\n";
-        $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
-        $message .= chunk_split(base64_encode($html_body)) . "\r\n";
-        
-        $message .= "--$alt_boundary--\r\n\r\n";
-        
+        // ── 첨부파일 공통 수집 ──────────────────────────────
+        $attachments_data = [];
         if (isset($_FILES['attachments']) && is_array($_FILES['attachments']['name'])) {
             $file_count = count($_FILES['attachments']['name']);
             for ($i = 0; $i < $file_count; $i++) {
-                if ($_FILES['attachments']['error'][$i] === UPLOAD_ERR_OK) {
-                    $tmp_name = $_FILES['attachments']['tmp_name'][$i];
-                    $file_name = $_FILES['attachments']['name'][$i];
-                    $file_size = $_FILES['attachments']['size'][$i];
-                    $file_type = $_FILES['attachments']['type'][$i];
-                    
-                    if (is_uploaded_file($tmp_name)) {
-                        $file_content = file_get_contents($tmp_name);
-                        $encoded_content = chunk_split(base64_encode($file_content));
-                        $encoded_filename = "=?UTF-8?B?" . base64_encode($file_name) . "?=";
-                        
-                        $message .= "--$mixed_boundary\r\n";
-                        $message .= "Content-Type: $file_type; name=\"$encoded_filename\"\r\n";
-                        $message .= "Content-Disposition: attachment; filename=\"$encoded_filename\"\r\n";
-                        $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
-                        $message .= $encoded_content . "\r\n";
-                    }
+                if ($_FILES['attachments']['error'][$i] === UPLOAD_ERR_OK && is_uploaded_file($_FILES['attachments']['tmp_name'][$i])) {
+                    $attachments_data[] = [
+                        'name'    => $_FILES['attachments']['name'][$i],
+                        'type'    => $_FILES['attachments']['type'][$i] ?: 'application/octet-stream',
+                        'content' => file_get_contents($_FILES['attachments']['tmp_name'][$i]),
+                    ];
                 }
             }
         }
-        
-        $message .= "--$mixed_boundary--\r\n";
-        
-        $success = mail($to, $encoded_subject, $message, $headers, "-f $from");
-        
-        if ($success) {
-            $filename = time() . ".M" . rand(100000, 999999) . "P" . getmypid() . "." . gethostname() . ":2,S";
-            $full_email_content = "From: $from\r\nTo: $to\r\nSubject: $encoded_subject\r\nDate: " . date('r') . "\r\n" . $headers . "\r\n" . $message;
-            
-            secure_write_file($username, '.Sent/cur', $filename, $full_email_content);
+
+        // ── 계정 조회 ──────────────────────────────────────
+        $send_account = null;
+        if ($account_id > 0) {
+            $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username");
+            $stmt->execute([':id' => $account_id, ':username' => $username]);
+            $send_account = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+        if (!$send_account) {
+            $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE username = :username AND service_type = 'onto' LIMIT 1");
+            $stmt->execute([':username' => $username]);
+            $send_account = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+
+        $is_onto = (!$send_account || $send_account['service_type'] === 'onto');
+
+        if ($is_onto) {
+            // ═══════════════════════════════════════════════
+            // [A] onto 계정 → 받는이 도메인에 따라 분기
+            //     - Outlook / iCloud → Mailjet API
+            //     - 나머지           → 서버 mail()
+            // ═══════════════════════════════════════════════
+            $from = $username . '@onto.kr';
+
+            // 받는이 파싱
+            $to_addresses = [];
+            foreach (array_filter(array_map('trim', preg_split('/[\s,;]+/', $to))) as $addr) {
+                if (filter_var($addr, FILTER_VALIDATE_EMAIL)) $to_addresses[] = $addr;
+            }
+            if (empty($to_addresses)) respond(false, '올바른 받는 이 이메일 주소가 없습니다.');
+
+            // Mailjet이 필요한 도메인 목록 (filter.txt에서 읽기)
+            $filter_file = __DIR__ . '/filter.txt';
+            $MAILJET_DOMAINS = [];
+            if (is_readable($filter_file)) {
+                $raw = file_get_contents($filter_file);
+                // 콤마 또는 줄바꿈으로 구분, 소문자 정규화, 빈 값 제거
+                $MAILJET_DOMAINS = array_values(array_filter(
+                    array_map('trim', preg_split('/[\r\n,]+/', $raw))
+                ));
+                $MAILJET_DOMAINS = array_map('strtolower', $MAILJET_DOMAINS);
+            }
+
+            // 받는이 중 하나라도 Mailjet 도메인이면 Mailjet 사용
+            $use_mailjet = false;
+            foreach ($to_addresses as $addr) {
+                $domain = strtolower(substr($addr, strrpos($addr, '@') + 1));
+                if (in_array($domain, $MAILJET_DOMAINS, true)) {
+                    $use_mailjet = true;
+                    break;
+                }
+            }
+            // CC에도 Mailjet 도메인이 있으면 Mailjet 사용
+            if (!$use_mailjet && !empty($cc)) {
+                foreach (array_filter(array_map('trim', preg_split('/[\s,;]+/', $cc))) as $addr) {
+                    if (filter_var($addr, FILTER_VALIDATE_EMAIL)) {
+                        $domain = strtolower(substr($addr, strrpos($addr, '@') + 1));
+                        if (in_array($domain, $MAILJET_DOMAINS, true)) { $use_mailjet = true; break; }
+                    }
+                }
+            }
+
+            // MIME 공통 빌드 (보낸메일함 저장용)
+            $mb   = "----=_Mx_" . md5(uniqid((string)rand(), true));
+            $ab   = "----=_Al_" . md5(uniqid((string)rand(), true));
+            $esub = "=?UTF-8?B?" . base64_encode($subject) . "?=";
+            $hdr  = "From: $from\r\nTo: $to\r\n";
+            if (!empty($cc)) $hdr .= "Cc: $cc\r\n";
+            $hdr .= "MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"$mb\"\r\n";
+            $body_raw  = "--$mb\r\nContent-Type: multipart/alternative; boundary=\"$ab\"\r\n\r\n";
+            $body_raw .= "--$ab\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($plain_text)) . "\r\n";
+            $body_raw .= "--$ab\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($html_body)) . "\r\n";
+            $body_raw .= "--$ab--\r\n\r\n--$mb--\r\n";
+
+            if ($use_mailjet) {
+                // ─── Mailjet 발송 ───────────────────────────
+                $MJ_KEY    = '86ecb242beaa17746e9def290bd37d3b';
+                $MJ_SECRET = '90008ab57a485dcfd7c42d1b5214c28e';
+
+                $mj_to = array_map(fn($a) => ['Email' => $a], $to_addresses);
+                $mj_msg = [
+                    'From'     => ['Email' => $from, 'Name' => $username],
+                    'To'       => $mj_to,
+                    'Subject'  => $subject,
+                    'HTMLPart' => $html_body,
+                    'TextPart' => $plain_text,
+                ];
+                if (!empty($cc)) {
+                    $cc_arr = [];
+                    foreach (array_filter(array_map('trim', preg_split('/[\s,;]+/', $cc))) as $addr) {
+                        if (filter_var($addr, FILTER_VALIDATE_EMAIL)) $cc_arr[] = ['Email' => $addr];
+                    }
+                    if (!empty($cc_arr)) $mj_msg['Cc'] = $cc_arr;
+                }
+                if (!empty($attachments_data)) {
+                    $mj_msg['Attachments'] = array_map(fn($a) => [
+                        'ContentType'   => $a['type'],
+                        'Filename'      => $a['name'],
+                        'Base64Content' => base64_encode($a['content']),
+                    ], $attachments_data);
+                }
+
+                $ch = curl_init('https://api.mailjet.com/v3.1/send');
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST           => true,
+                    CURLOPT_POSTFIELDS     => json_encode(['Messages' => [$mj_msg]]),
+                    CURLOPT_USERPWD        => $MJ_KEY . ':' . $MJ_SECRET,
+                    CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+                    CURLOPT_TIMEOUT        => 30,
+                ]);
+                $mj_raw    = curl_exec($ch);
+                $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $curl_err  = curl_error($ch);
+                curl_close($ch);
+
+                if ($curl_err) respond(false, 'Mailjet 연결 오류: ' . $curl_err);
+
+                $mj_res = json_decode($mj_raw, true);
+                $status = $mj_res['Messages'][0]['Status'] ?? '';
+                if (!($http_code === 200 && $status === 'success')) {
+                    $err = $mj_res['Messages'][0]['Errors'][0]['ErrorMessage'] ?? ($mj_raw ?: '알 수 없는 오류');
+                    respond(false, '메일 발송 실패 (Mailjet): ' . $err);
+                }
+
+            } else {
+                // ─── 서버 mail() 발송 ──────────────────────
+                $encoded_subject = $esub;
+                $mail_headers  = "From: $from\r\nReply-To: $from\r\n";
+                if (!empty($cc)) $mail_headers .= "Cc: $cc\r\n";
+                $mail_headers .= "MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"$mb\"\r\n";
+
+                $success = mail($to, $encoded_subject, $body_raw, $mail_headers, "-f $from");
+                if (!$success) respond(false, '메일 발송에 실패했습니다.');
+            }
+
+            // 보낸 메일함 저장
+            $fn = time() . ".M" . rand(100000, 999999) . "P" . getmypid() . "." . gethostname() . ":2,S";
+            secure_write_file($username, '.Sent/cur', $fn, $hdr . "Subject: $esub\r\nDate: " . date('r') . "\r\n\r\n" . $body_raw);
             respond(true, '메일이 성공적으로 전송되었습니다.');
+
         } else {
-            respond(false, '메일 발송에 실패했습니다.');
+            // ═══════════════════════════════════════════════
+            // [B] 외부 계정 → 해당 SMTP 서버
+            // ═══════════════════════════════════════════════
+            $from      = $send_account['email'];
+            $smtp_host = $send_account['smtp_host'];
+            $smtp_port = intval($send_account['smtp_port']);
+            $smtp_ssl  = $send_account['smtp_ssl'];  // 'ssl','tls',''
+            $smtp_user = $send_account['mail_username'];
+            $smtp_pass = $send_account['mail_password'];
+            $smtp_auth = intval($send_account['smtp_auth'] ?? 1);
+
+            $mb  = "----=_Mx_" . md5(uniqid((string)rand(), true));
+            $ab  = "----=_Al_" . md5(uniqid((string)rand(), true));
+            $esub = "=?UTF-8?B?" . base64_encode($subject) . "?=";
+
+            $mime  = "--$mb\r\nContent-Type: multipart/alternative; boundary=\"$ab\"\r\n\r\n";
+            $mime .= "--$ab\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($plain_text)) . "\r\n";
+            $mime .= "--$ab\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($html_body)) . "\r\n";
+            $mime .= "--$ab--\r\n\r\n";
+            foreach ($attachments_data as $att) {
+                $enc_fn = "=?UTF-8?B?" . base64_encode($att['name']) . "?=";
+                $mime .= "--$mb\r\nContent-Type: {$att['type']}; name=\"$enc_fn\"\r\n";
+                $mime .= "Content-Disposition: attachment; filename=\"$enc_fn\"\r\n";
+                $mime .= "Content-Transfer-Encoding: base64\r\n\r\n";
+                $mime .= chunk_split(base64_encode($att['content'])) . "\r\n";
+            }
+            $mime .= "--$mb--\r\n";
+
+            $err_str = ''; $err_no = 0;
+            $sock = ($smtp_ssl === 'ssl')
+                ? @fsockopen("ssl://$smtp_host", $smtp_port, $err_no, $err_str, 15)
+                : @fsockopen($smtp_host, $smtp_port, $err_no, $err_str, 15);
+            if (!$sock) respond(false, "SMTP 연결 실패 ({$smtp_host}:{$smtp_port}): $err_str");
+
+            $rd = function() use ($sock) {
+                $d = '';
+                while ($l = fgets($sock, 512)) { $d .= $l; if ($l[3] === ' ') break; }
+                return $d;
+            };
+            $sd = function(string $c) use ($sock, $rd) { fwrite($sock, $c . "\r\n"); return $rd(); };
+
+            $rd();
+            $ehlo = gethostname() ?: 'localhost';
+            $sd("EHLO $ehlo");
+
+            if ($smtp_ssl === 'tls') {
+                $sd("STARTTLS");
+                stream_socket_enable_crypto($sock, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+                $sd("EHLO $ehlo");
+            }
+
+            if ($smtp_auth && !empty($smtp_user)) {
+                $sd("AUTH LOGIN");
+                $sd(base64_encode($smtp_user));
+                $ar = $sd(base64_encode($smtp_pass));
+                if (substr(trim($ar), 0, 3) !== '235') {
+                    fclose($sock);
+                    respond(false, 'SMTP 인증 실패: ' . trim($ar));
+                }
+            }
+
+            $sd("MAIL FROM:<$from>");
+            foreach (array_filter(array_map('trim', preg_split('/[\s,;]+/', $to . (empty($cc) ? '' : ",$cc")))) as $rcpt) {
+                if (filter_var($rcpt, FILTER_VALIDATE_EMAIL)) $sd("RCPT TO:<$rcpt>");
+            }
+
+            $sd("DATA");
+            $hdr  = "From: $from\r\nTo: $to\r\n";
+            if (!empty($cc)) $hdr .= "Cc: $cc\r\n";
+            $hdr .= "Subject: $esub\r\nDate: " . date('r') . "\r\nMIME-Version: 1.0\r\n";
+            $hdr .= "Content-Type: multipart/mixed; boundary=\"$mb\"\r\n\r\n";
+            $dr = $sd($hdr . $mime . "\r\n.");
+            $sd("QUIT");
+            fclose($sock);
+
+            if (substr(trim($dr), 0, 3) !== '250') {
+                respond(false, 'SMTP 발송 실패: ' . trim($dr));
+            }
+
+            // 외부 계정 IMAP Sent 폴더에 저장 시도
+            $i_host = $send_account['imap_host'];
+            $i_port = intval($send_account['imap_port']);
+            $i_ssl  = $send_account['imap_ssl'];
+            $i_user = $send_account['mail_username'];
+            $i_pass = $send_account['mail_password'];
+            $sflag  = ($i_ssl === 'ssl') ? '/ssl/novalidate-cert' : '/novalidate-cert';
+            $mbox   = "{{$i_host}:{$i_port}/imap{$sflag}}Sent";
+            $imap   = @imap_open($mbox, $i_user, $i_pass, 0, 1);
+            if ($imap) {
+                @imap_append($imap, $mbox, $hdr . $mime, "\\Seen");
+                imap_close($imap);
+            }
+
+            respond(true, '메일이 성공적으로 전송되었습니다.');
         }
         break;
+
 
     case 'empty_trash':
         check_auth();
