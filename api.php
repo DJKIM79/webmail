@@ -178,6 +178,38 @@ try {
     $db->exec("UPDATE users SET group_name = '관리자', role = 'admin' WHERE username = 'dj'");
 } catch (Exception $e) {}
 
+// Create table address_book
+try {
+    $db->exec("CREATE TABLE IF NOT EXISTS address_book (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        group_name TEXT NOT NULL DEFAULT '미정',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(username, email)
+    )");
+} catch (Exception $e) {}
+
+// Create table address_groups
+try {
+    $db->exec("CREATE TABLE IF NOT EXISTS address_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(username, name)
+    )");
+} catch (Exception $e) {}
+
+try {
+    $db->exec("ALTER TABLE address_groups ADD COLUMN color TEXT DEFAULT '#3b82f6'");
+} catch (Exception $e) {}
+try {
+    $db->exec("ALTER TABLE address_groups ADD COLUMN sort_order INTEGER DEFAULT 0");
+} catch (Exception $e) {}
+
+
 // --- HELPER FUNCTIONS ---
 
 function respond(bool $success, string $message, array $data = []): void {
@@ -2139,6 +2171,13 @@ switch ($action) {
             respond(false, '계정 ID가 누락되었습니다.');
         }
 
+        $stmtCount = $db->prepare("SELECT COUNT(*) FROM external_mail_accounts WHERE username = :username");
+        $stmtCount->execute([':username' => $username]);
+        $count = intval($stmtCount->fetchColumn());
+        if ($count <= 1) {
+            respond(false, '최소 하나의 메일 계정은 설정되어 있어야 합니다.');
+        }
+
         $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username");
         $stmt->execute([':id' => $id, ':username' => $username]);
         $existing = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -2535,8 +2574,265 @@ switch ($action) {
         respond(true, '필터가 삭제되었습니다.');
         break;
 
+    case 'list_address_book':
+        check_auth();
+        $username = $_SESSION['username'];
+        $stmt = $db->prepare("SELECT * FROM address_book WHERE username = :username ORDER BY name ASC");
+        $stmt->execute([':username' => $username]);
+        $list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        respond(true, '성공', ['address_book' => $list]);
+        break;
+
+    case 'list_received_senders':
+        check_auth();
+        $username = $_SESSION['username'];
+        $senders = get_received_senders($username, $db);
+        respond(true, '성공', ['senders' => $senders]);
+        break;
+
+    case 'save_address':
+        check_auth();
+        $username = $_SESSION['username'];
+        $email = trim($_POST['email'] ?? '');
+        $name = trim($_POST['name'] ?? '');
+        $group_name = trim($_POST['group_name'] ?? '미정');
+        if (empty($email) || empty($name)) {
+            respond(false, '이름과 이메일 주소를 입력해주세요.');
+        }
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            respond(false, '유효하지 않은 이메일 주소입니다.');
+        }
+        $stmt = $db->prepare("INSERT INTO address_book (username, name, email, group_name) VALUES (:username, :name, :email, :group_name)
+            ON CONFLICT(username, email) DO UPDATE SET name = :name, group_name = :group_name");
+        $stmt->execute([
+            ':username' => $username,
+            ':name' => $name,
+            ':email' => $email,
+            ':group_name' => $group_name
+        ]);
+        respond(true, '주소록에 저장되었습니다.');
+        break;
+
+    case 'delete_address':
+        check_auth();
+        $username = $_SESSION['username'];
+        $id = intval($_POST['id'] ?? 0);
+        $stmt = $db->prepare("DELETE FROM address_book WHERE id = :id AND username = :username");
+        $stmt->execute([':id' => $id, ':username' => $username]);
+        respond(true, '주소록에서 삭제되었습니다.');
+        break;
+
+    case 'list_address_groups':
+        check_auth();
+        $username = $_SESSION['username'];
+        check_and_seed_address_groups($username, $db);
+        $stmt = $db->prepare("SELECT * FROM address_groups WHERE username = :username ORDER BY sort_order ASC, id ASC");
+        $stmt->execute([':username' => $username]);
+        $list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        respond(true, '성공', ['address_groups' => $list]);
+        break;
+
+    case 'save_address_group':
+        check_auth();
+        $username = $_SESSION['username'];
+        $name = trim($_POST['name'] ?? '');
+        if (empty($name)) {
+            respond(false, '그룹 이름을 입력해주세요.');
+        }
+        try {
+            $stmt = $db->prepare("INSERT INTO address_groups (username, name) VALUES (:username, :name)");
+            $stmt->execute([':username' => $username, ':name' => $name]);
+            respond(true, '그룹이 추가되었습니다.');
+        } catch (PDOException $e) {
+            respond(false, '이미 존재하는 그룹 이름입니다.');
+        }
+        break;
+
+    case 'delete_address_group':
+        check_auth();
+        $username = $_SESSION['username'];
+        $id = intval($_POST['id'] ?? 0);
+        
+        $stmtName = $db->prepare("SELECT name FROM address_groups WHERE id = :id AND username = :username");
+        $stmtName->execute([':id' => $id, ':username' => $username]);
+        $gname = $stmtName->fetchColumn();
+        
+        if (!$gname) {
+            respond(false, '존재하지 않는 그룹입니다.');
+        }
+        if ($gname === '미정') {
+            respond(false, '기본 그룹(미정)은 삭제할 수 없습니다.');
+        }
+        
+        $stmtUpdate = $db->prepare("UPDATE address_book SET group_name = '미정' WHERE username = :username AND group_name = :group_name");
+        $stmtUpdate->execute([':username' => $username, ':group_name' => $gname]);
+        
+        $stmtDel = $db->prepare("DELETE FROM address_groups WHERE id = :id AND username = :username");
+        $stmtDel->execute([':id' => $id, ':username' => $username]);
+        
+        respond(true, '그룹이 삭제되었습니다.');
+        break;
+
+    case 'set_address_group_color':
+        check_auth();
+        $username = $_SESSION['username'];
+        $id = intval($_POST['id'] ?? 0);
+        $color = trim($_POST['color'] ?? '');
+        if ($id <= 0 || empty($color)) {
+            respond(false, '올바르지 않은 요청입니다.');
+        }
+        $stmt = $db->prepare("UPDATE address_groups SET color = :color WHERE id = :id AND username = :username");
+        $stmt->execute([':color' => $color, ':id' => $id, ':username' => $username]);
+        respond(true, '그룹 색상이 변경되었습니다.');
+        break;
+
+    case 'rename_address_group':
+        check_auth();
+        $username = $_SESSION['username'];
+        $id = intval($_POST['id'] ?? 0);
+        $new_name = trim($_POST['name'] ?? '');
+        if ($id <= 0 || empty($new_name)) {
+            respond(false, '그룹 이름을 입력해주세요.');
+        }
+        
+        $stmtOld = $db->prepare("SELECT name FROM address_groups WHERE id = :id AND username = :username");
+        $stmtOld->execute([':id' => $id, ':username' => $username]);
+        $old_name = $stmtOld->fetchColumn();
+        
+        if (!$old_name) {
+            respond(false, '존재하지 않는 그룹입니다.');
+        }
+        if ($old_name === '미정') {
+            respond(false, '기본 그룹(미정)은 변경할 수 없습니다.');
+        }
+        if ($new_name === '미정') {
+            respond(false, '그룹 이름을 "미정"으로 변경할 수 없습니다.');
+        }
+
+        try {
+            $db->beginTransaction();
+            
+            $stmt = $db->prepare("UPDATE address_groups SET name = :new_name WHERE id = :id AND username = :username");
+            $stmt->execute([':new_name' => $new_name, ':id' => $id, ':username' => $username]);
+            
+            $stmtBook = $db->prepare("SELECT id, group_name FROM address_book WHERE username = :username");
+            $stmtBook->execute([':username' => $username]);
+            $contacts = $stmtBook->fetchAll(PDO::FETCH_ASSOC);
+            
+            $stmtUpdateBook = $db->prepare("UPDATE address_book SET group_name = :group_name WHERE id = :id");
+            foreach ($contacts as $c) {
+                $groups = explode(',', $c['group_name']);
+                $changed = false;
+                foreach ($groups as $idx => $g) {
+                    if (trim($g) === $old_name) {
+                        $groups[$idx] = $new_name;
+                        $changed = true;
+                    }
+                }
+                if ($changed) {
+                    $new_group_string = implode(', ', array_map('trim', $groups));
+                    $stmtUpdateBook->execute([':group_name' => $new_group_string, ':id' => $c['id']]);
+                }
+            }
+            
+            $db->commit();
+            respond(true, '그룹 이름이 변경되었습니다.');
+        } catch (Exception $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            respond(false, '그룹 이름 변경 실패: ' . $e->getMessage());
+        }
+        break;
+
+    case 'update_address_group_order':
+        check_auth();
+        $username = $_SESSION['username'];
+        $order = json_decode($_POST['order'] ?? '[]', true);
+        if (!is_array($order)) {
+            respond(false, '잘못된 순서 데이터입니다.');
+        }
+        try {
+            $db->beginTransaction();
+            $stmt = $db->prepare("UPDATE address_groups SET sort_order = :sort_order WHERE id = :id AND username = :username");
+            foreach ($order as $index => $id) {
+                $stmt->execute([
+                    ':sort_order' => $index,
+                    ':id' => intval($id),
+                    ':username' => $username
+                ]);
+            }
+            $db->commit();
+            respond(true, '그룹 순서가 저장되었습니다.');
+        } catch (Exception $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            respond(false, '그룹 순서 저장 실패: ' . $e->getMessage());
+        }
+        break;
+
     default:
 
         respond(false, '잘못된 요청입니다.');
         break;
 }
+
+function check_and_seed_address_groups(string $username, PDO $db): void {
+    $stmt = $db->prepare("SELECT COUNT(*) FROM address_groups WHERE username = :username");
+    $stmt->execute([':username' => $username]);
+    if ($stmt->fetchColumn() == 0) {
+        $default_groups = ['미정', '친구', '가족', '업무'];
+        $stmtInsert = $db->prepare("INSERT OR IGNORE INTO address_groups (username, name) VALUES (:username, :name)");
+        foreach ($default_groups as $g) {
+            $stmtInsert->execute([':username' => $username, ':name' => $g]);
+        }
+    }
+}
+
+function get_received_senders(string $username, PDO $db): array {
+    $senders = [];
+    $sub_paths = ['new', 'cur'];
+    
+    // 이미 등록된 주소록 목록을 가져옴 (제외하기 위함)
+    $stmt = $db->prepare("SELECT email FROM address_book WHERE username = :username");
+    $stmt->execute([':username' => $username]);
+    $existing_emails = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $existing_emails_map = array_flip(array_map('strtolower', $existing_emails));
+
+    foreach ($sub_paths as $sub_path) {
+        $files = secure_list_files($username, $sub_path);
+        foreach ($files as $file) {
+            $content = secure_read_file($username, $sub_path, $file);
+            if ($content) {
+                $parts = explode("\n\n", str_replace("\r", "", $content), 2);
+                $header_raw = $parts[0] ?? '';
+                $headers = parse_headers($header_raw);
+                if (isset($headers['from'])) {
+                    $from = robust_decode_header($headers['from']);
+                    if (preg_match('/^(.*?)<([^>]+)>/', $from, $matches)) {
+                        $name = trim($matches[1]);
+                        $email = trim($matches[2]);
+                        $name = trim($name, " '\"");
+                    } else {
+                        $name = '';
+                        $email = trim($from);
+                    }
+                    
+                    $email_lower = strtolower($email);
+                    if (filter_var($email, FILTER_VALIDATE_EMAIL) && !isset($existing_emails_map[$email_lower])) {
+                        if (!isset($senders[$email_lower])) {
+                            $senders[$email_lower] = [
+                                'name' => $name ? $name : '미정',
+                                'email' => $email,
+                                'group_name' => '미정'
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return array_values($senders);
+}
+

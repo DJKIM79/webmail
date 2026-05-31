@@ -6195,7 +6195,105 @@ body.theme-white .sidebar-group-header:hover {
     scrollbar-width: none;
 }
 
+/* Address Book & Autocomplete styling */
+.btn-etc-settings:hover {
+    background: var(--bg-hover) !important;
+    border-color: var(--color-primary) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px var(--border-glow);
+}
 
+.addr-tab-btn {
+    transition: all 0.2s ease;
+}
 
+.addr-tab-btn:hover {
+    color: var(--text-primary) !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+}
 
+.addressbook-table th {
+    font-weight: 600;
+    border-bottom: 2px solid var(--border-color);
+}
 
+.addressbook-table td {
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.addressbook-table tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.autocomplete-items div:hover {
+    background-color: var(--border-color) !important;
+}
+
+.autocomplete-items::-webkit-scrollbar {
+    width: 6px;
+}
+
+.autocomplete-items::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.autocomplete-items::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.addr-group-opt-item {
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.addr-group-opt-item:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Custom Checkbox Styles for Address Book Selection */
+.chk-addr-select, #chk-addr-all-select {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    transition: all var(--transition-fast);
+    margin: 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+}
+
+.chk-addr-select:checked, #chk-addr-all-select:checked {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.chk-addr-select:indeterminate, #chk-addr-all-select:indeterminate {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.chk-addr-select::after, #chk-addr-all-select::after {
+    content: "\f00c";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 9px;
+    color: var(--color-primary-text, #ffffff);
+    display: none;
+}
+
+.chk-addr-select:checked::after, #chk-addr-all-select:checked::after {
+    display: block;
+}
+
+.chk-addr-select:indeterminate::after, #chk-addr-all-select:indeterminate::after {
+    content: "\f068";
+    display: block;
+}

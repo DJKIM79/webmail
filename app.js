@@ -15,7 +15,14 @@ document.addEventListener('DOMContentLoaded', () => {
         externalMails: [],
         sidebarCollapsedGroups: JSON.parse(localStorage.getItem('mail-sidebar-collapsed-groups') || '{}'),
         personalFolderExpanded: localStorage.getItem('mail-personal-folder-expanded') === 'true',
-        showFlaggedOnly: false
+        showFlaggedOnly: false,
+        addressBookSelectMode: false,
+        addressBookListMy: [],
+        addressBookListReceived: [],
+        addressBookCurrentTab: 'my',
+        addressGroups: [],
+        addressGroupColors: {},
+        addressBookFilterGroups: []
     };
 
     function getBaseId(id) {
@@ -47,10 +54,10 @@ document.addEventListener('DOMContentLoaded', () => {
             hash = folderName.charCodeAt(i) + ((hash << 5) - hash);
         }
         
-        // Premium color palette for personal folders
+        // Premium color palette for personal folders (matches the 10 theme colors)
         const colors = [
-            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
-            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
+            '#ef4444', '#f97316', '#f59e0b', '#10b981', '#3b82f6',
+            '#6366f1', '#8b5cf6', '#ffffff', '#71717a', '#000000'
         ];
         
         const index = Math.abs(hash) % colors.length;
@@ -253,10 +260,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // Ignore <p><br></p> or empty spaces as content
         const isBodyEmpty = body.length === 0 && (!quillEditor || !quillEditor.root.innerHTML.includes('<img'));
         
-        if (to || subject || !isBodyEmpty) {
-            document.getElementById('compose-confirm-modal').classList.remove('hidden');
-        } else {
+        // Also check if the fields are unmodified from their initial state
+        const currentBodyHtml = quillEditor ? quillEditor.root.innerHTML : '';
+        const isUnmodified = to === (composeInitialState ? composeInitialState.to : '') &&
+                             subject === (composeInitialState ? composeInitialState.subject : '') &&
+                             currentBodyHtml === (composeInitialState ? composeInitialState.bodyHtml : '') &&
+                             uploadedFiles.length === 0;
+                             
+        const isFieldsEmpty = !to && !subject && isBodyEmpty && uploadedFiles.length === 0;
+        
+        if (isFieldsEmpty || isUnmodified) {
             composeModal.classList.add('hidden');
+        } else {
+            document.getElementById('compose-confirm-modal').classList.remove('hidden');
         }
     }
 
@@ -1765,6 +1781,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let quillEditor = null;
+    let composeInitialState = {
+        to: '',
+        subject: '',
+        bodyHtml: ''
+    };
 
     function initCustomToolbar(editor) {
         const toolbar = document.getElementById('custom-editor-toolbar');
@@ -1812,33 +1833,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Toggle dropdown open/close
         const dropdowns = toolbar.querySelectorAll('.toolbar-dropdown-wrapper');
+        
+        const closeAllDropdowns = () => {
+            dropdowns.forEach(wrapper => {
+                wrapper.classList.remove('open');
+                const menu = wrapper.querySelector('.toolbar-dropdown-menu');
+                if (menu) menu.classList.add('hidden');
+            });
+        };
+
         dropdowns.forEach(wrapper => {
             const trigger = wrapper.querySelector('.toolbar-dropdown-trigger, .toolbar-btn');
             const menu = wrapper.querySelector('.toolbar-dropdown-menu');
             if (trigger && menu) {
                 trigger.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    // Close all other dropdowns
-                    dropdowns.forEach(other => {
-                        if (other !== wrapper) {
-                            other.classList.remove('open');
-                            const otherMenu = other.querySelector('.toolbar-dropdown-menu');
-                            if (otherMenu) otherMenu.classList.add('hidden');
+                    
+                    const isAlreadyOpen = wrapper.classList.contains('open');
+                    
+                    // Close all other dropdowns first
+                    closeAllDropdowns();
+                    
+                    if (!isAlreadyOpen) {
+                        wrapper.classList.add('open');
+                        menu.classList.remove('hidden');
+                        
+                        // Dynamically position the dropdown with position: fixed to bypass overflow clipping
+                        const rect = trigger.getBoundingClientRect();
+                        menu.style.position = 'fixed';
+                        menu.style.top = `${rect.bottom + 6}px`;
+                        // Align dropdown left edge with trigger button left edge
+                        menu.style.left = `${rect.left}px`;
+                        // Ensure it fits within the viewport width
+                        const menuRect = menu.getBoundingClientRect();
+                        if (rect.left + menuRect.width > window.innerWidth) {
+                            menu.style.left = `${window.innerWidth - menuRect.width - 12}px`;
                         }
-                    });
-                    wrapper.classList.toggle('open');
-                    menu.classList.toggle('hidden');
+                    }
                 });
             }
         });
 
+        // Close dropdowns on scroll or resize to prevent misalignment
+        toolbar.addEventListener('scroll', closeAllDropdowns);
+        window.addEventListener('resize', closeAllDropdowns);
+        window.addEventListener('scroll', closeAllDropdowns, true); // capture scroll
+
         // Close dropdowns on outside click
         document.addEventListener('click', () => {
-            dropdowns.forEach(wrapper => {
-                wrapper.classList.remove('open');
-                const menu = wrapper.querySelector('.toolbar-dropdown-menu');
-                if (menu) menu.classList.add('hidden');
-            });
+            closeAllDropdowns();
         });
 
         // Prevent editor loss of focus when clicking custom toolbar elements
@@ -2189,6 +2232,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 toolbar.dispatchEvent(new Event('refresh-arrows'));
             }
         }, 150);
+
+        // Save initial state to check if modified when closing
+        composeInitialState = {
+            to: formCompose.to.value.trim(),
+            subject: formCompose.subject.value.trim(),
+            bodyHtml: quillEditor ? quillEditor.root.innerHTML : ''
+        };
     }
 
     formCompose.addEventListener('submit', async (e) => {
@@ -2894,8 +2944,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderColorPicker(targetName, isFilter = false) {
         const colors = [
-            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
-            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
+            '#ef4444', '#f97316', '#f59e0b', '#10b981', '#3b82f6',
+            '#6366f1', '#8b5cf6', '#ffffff', '#71717a', '#000000'
         ];
         
         tagColorGrid.innerHTML = '';
@@ -2925,7 +2975,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('#tag-color-popover') && !e.target.closest('.tag-folder-icon-clickable') && !e.target.closest('.filter-icon-clickable')) {
+        if (!e.target.closest('#tag-color-popover') && !e.target.closest('.tag-folder-icon-clickable') && !e.target.closest('.filter-icon-clickable') && !e.target.closest('.group-icon-clickable') && !e.target.closest('.address-group-icon-clickable')) {
             tagColorPopover.classList.add('hidden');
         }
     });
@@ -3839,8 +3889,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 10 theme colors
         const colorList = [
-            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
-            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
+            '#ef4444', '#f97316', '#f59e0b', '#10b981', '#3b82f6',
+            '#6366f1', '#8b5cf6', '#ffffff', '#71717a', '#000000'
         ];
         let colorHtml = '';
         const activeColor = acc ? acc.color : '#3b82f6';
@@ -4084,6 +4134,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnDeleteAcc = externalMailDetailPane.querySelector('#btn-delete-external-mail');
         if (btnDeleteAcc && acc) {
             btnDeleteAcc.addEventListener('click', async () => {
+                if (state.externalMails && state.externalMails.length <= 1) {
+                    showToast('최소 하나의 메일 계정은 설정되어 있어야 합니다.');
+                    return;
+                }
                 if (!await customConfirm(`'${acc.email}' 계정 연동을 완전히 해제하고 삭제하시겠습니까?`, 'fa-solid fa-triangle-exclamation')) return;
                 
                 showToast('계정 연동 해제 중...');
@@ -4950,8 +5004,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderGroupColorPicker(groupName) {
         const colors = [
-            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
-            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
+            '#ef4444', '#f97316', '#f59e0b', '#10b981', '#3b82f6',
+            '#6366f1', '#8b5cf6', '#ffffff', '#71717a', '#000000'
         ];
 
         const tagColorGrid = document.getElementById('tag-color-grid');
@@ -5394,6 +5448,1091 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // --------------------------------------------------
+    // ADDRESS BOOK SYSTEM (주소록 시스템)
+    // --------------------------------------------------
+    const addressBookModal = document.getElementById('addressbook-modal');
+    const addressFormModal = document.getElementById('address-form-modal');
+    const btnManageAddressbook = document.getElementById('btn-manage-addressbook');
+    const btnAddAddress = document.getElementById('btn-add-address');
+    const formAddress = document.getElementById('form-address');
+    const addrSearchInput = document.getElementById('addr-search');
+    const addressbookList = document.getElementById('addressbook-list');
+    const addrTabBtns = document.querySelectorAll('.addr-tab-btn');
+    
+    const btnAddressbookPopup = document.getElementById('btn-addressbook-popup');
+    const mailToInput = document.getElementById('mail-to');
+    const autocompleteList = document.getElementById('autocomplete-list');
+
+    const btnManageAddrGroups = document.getElementById('btn-manage-addr-groups');
+    const addressGroupsModal = document.getElementById('address-groups-modal');
+    const formAddAddrGroup = document.getElementById('form-add-addr-group');
+    const newAddrGroupName = document.getElementById('new-addr-group-name');
+    const addrGroupsList = document.getElementById('addr-groups-list');
+
+    // 주소록 모달 열기
+    function openAddressBook(selectMode = false) {
+        state.addressBookSelectMode = selectMode;
+        
+        const footer = document.getElementById('addressbook-footer');
+        if (footer) {
+            if (selectMode) {
+                footer.classList.remove('hidden');
+            } else {
+                footer.classList.add('hidden');
+            }
+        }
+
+        const filterDropdown = document.getElementById('addr-filter-group-dropdown');
+        if (filterDropdown) {
+            if (selectMode) {
+                filterDropdown.style.display = 'block';
+                filterDropdown.classList.remove('hidden');
+            } else {
+                filterDropdown.style.display = 'none';
+                filterDropdown.classList.add('hidden');
+            }
+        }
+
+        if (addressBookModal) {
+            addressBookModal.classList.remove('hidden');
+            // 검색 필드 초기화
+            if (addrSearchInput) addrSearchInput.value = '';
+            // 내 주소록 탭을 기본 활성화
+            switchAddressBookTab('my');
+        }
+    }
+
+    // 주소록 선택 완료 (확인) 버튼 바인딩
+    const btnAddressbookConfirm = document.getElementById('btn-addressbook-confirm');
+    if (btnAddressbookConfirm) {
+        btnAddressbookConfirm.addEventListener('click', () => {
+            const checked = Array.from(addressbookList ? addressbookList.querySelectorAll('.chk-addr-select:checked') : []).map(chk => chk.dataset.email);
+            if (mailToInput) {
+                mailToInput.value = checked.join(', ');
+                mailToInput.dispatchEvent(new Event('input'));
+            }
+            if (addressBookModal) addressBookModal.classList.add('hidden');
+        });
+    }
+
+    // 설정 페이지의 주소록 버튼 클릭 시
+    if (btnManageAddressbook) {
+        btnManageAddressbook.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openAddressBook(false);
+        });
+    }
+
+    // 작성 페이지의 주소록 팝업 버튼 클릭 시
+    if (btnAddressbookPopup) {
+        btnAddressbookPopup.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openAddressBook(true);
+        });
+    }
+
+    // 주소록 탭 전환 함수
+    function switchAddressBookTab(tabName) {
+        state.addressBookCurrentTab = tabName;
+        addrTabBtns.forEach(btn => {
+            if (btn.dataset.tab === tabName) {
+                btn.classList.add('active');
+                btn.style.borderBottom = '2px solid var(--color-primary)';
+                btn.style.color = 'var(--text-primary)';
+                btn.style.fontWeight = 'bold';
+            } else {
+                btn.classList.remove('active');
+                btn.style.borderBottom = '2px solid transparent';
+                btn.style.color = 'var(--text-secondary)';
+                btn.style.fontWeight = 'normal';
+            }
+        });
+        loadAddressBookData();
+    }
+
+    // 탭 버튼 클릭 이벤트 바인딩
+    addrTabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            switchAddressBookTab(btn.dataset.tab);
+        });
+    });
+
+    // 주소록 데이터 API 로드 및 렌더링
+    async function loadAddressBookData() {
+        if (!addressbookList) return;
+        addressbookList.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
+        
+        try {
+            // 그룹 정보 로드하여 색상 맵핑 캐싱
+            const groupsRes = await apiRequest('list_address_groups');
+            if (groupsRes.success) {
+                state.addressGroups = groupsRes.address_groups || [];
+                state.addressGroupColors = {};
+                state.addressGroups.forEach(g => {
+                    state.addressGroupColors[g.name] = g.color || '#3b82f6';
+                });
+                initAddressBookFilterGroups();
+            }
+
+            // 두 목록을 모두 미리 받아와서 검색 및 자동완성에 대비
+            const myRes = await apiRequest('list_address_book');
+            if (myRes.success) {
+                state.addressBookListMy = myRes.address_book || [];
+            }
+            
+            const recvRes = await apiRequest('list_received_senders');
+            if (recvRes.success) {
+                state.addressBookListReceived = recvRes.senders || [];
+            }
+
+            renderAddressBookList();
+        } catch (err) {
+            console.error('Error loading address book:', err);
+            addressbookList.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: var(--color-danger);">데이터 로드 실패</td></tr>';
+        }
+    }
+
+    // 목록 렌더링 (검색 필터링 포함)
+    function renderAddressBookList() {
+        if (!addressbookList) return;
+        const search = (addrSearchInput ? addrSearchInput.value : '').toLowerCase().trim();
+        const tab = state.addressBookCurrentTab;
+        const dataList = (tab === 'my') ? state.addressBookListMy : state.addressBookListReceived;
+
+        // 검색 필터링 & 그룹 필터링
+        const filtered = dataList.filter(item => {
+            const name = (item.name || '').toLowerCase();
+            const email = (item.email || '').toLowerCase();
+            const matchesSearch = name.includes(search) || email.includes(search);
+
+            let matchesGroup = true;
+            if (state.addressBookSelectMode) {
+                const itemGroups = (item.group_name || '미정').split(',').map(s => s.trim()).filter(Boolean);
+                matchesGroup = itemGroups.some(g => state.addressBookFilterGroups.includes(g));
+            }
+
+            return matchesSearch && matchesGroup;
+        });
+
+        // thead 동적 설정
+        const thead = document.getElementById('addressbook-thead');
+        if (thead) {
+            if (state.addressBookSelectMode) {
+                thead.innerHTML = `
+                    <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary);">
+                        <th style="padding: 8px; width: 30px; text-align: center;"><input type="checkbox" id="chk-addr-all-select"></th>
+                        <th style="padding: 8px; width: 80px;">이름</th>
+                        <th style="padding: 8px;">이메일</th>
+                        <th style="padding: 8px; width: 55px;">그룹</th>
+                    </tr>
+                `;
+                const chkAll = document.getElementById('chk-addr-all-select');
+                if (chkAll) {
+                    chkAll.addEventListener('change', () => {
+                        const checkboxes = addressbookList.querySelectorAll('.chk-addr-select');
+                        checkboxes.forEach(c => {
+                            c.checked = chkAll.checked;
+                            const row = c.closest('tr');
+                            if (row) {
+                                if (chkAll.checked) {
+                                    row.style.background = 'var(--bg-active)';
+                                } else {
+                                    row.style.background = 'transparent';
+                                }
+                            }
+                        });
+                    });
+                }
+            } else {
+                thead.innerHTML = `
+                    <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary);">
+                        <th style="padding: 8px; width: 80px;">이름</th>
+                        <th style="padding: 8px;">이메일</th>
+                        <th style="padding: 8px; width: 55px;">그룹</th>
+                        <th style="padding: 8px; width: 110px; text-align: right;"></th>
+                    </tr>
+                `;
+            }
+        }
+
+        if (filtered.length === 0) {
+            addressbookList.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: var(--text-secondary);">검색 결과가 없습니다.</td></tr>';
+            return;
+        }
+
+        addressbookList.innerHTML = '';
+        filtered.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border-color)';
+            if (state.addressBookSelectMode) {
+                tr.style.cursor = 'pointer';
+            }
+            
+            // Checkbox (Only in selectMode)
+            let chk = null;
+            if (state.addressBookSelectMode) {
+                const tdChk = document.createElement('td');
+                tdChk.style.padding = '8px';
+                tdChk.style.textAlign = 'center';
+                
+                chk = document.createElement('input');
+                chk.type = 'checkbox';
+                chk.className = 'chk-addr-select';
+                chk.dataset.email = item.email;
+                
+                // Pre-check if already in mailToInput
+                const mailToVal = document.getElementById('mail-to')?.value || '';
+                const existingEmails = mailToVal.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                if (existingEmails.includes(item.email.toLowerCase().trim())) {
+                    chk.checked = true;
+                    tr.style.background = 'var(--bg-active)';
+                }
+
+                tdChk.appendChild(chk);
+                tr.appendChild(tdChk);
+
+                // Row click toggles selection
+                tr.addEventListener('click', (e) => {
+                    if (e.target !== chk) {
+                        chk.checked = !chk.checked;
+                    }
+                    if (chk.checked) {
+                        tr.style.background = 'var(--bg-active)';
+                    } else {
+                        tr.style.background = 'transparent';
+                    }
+                    
+                    const allSelect = document.getElementById('chk-addr-all-select');
+                    if (allSelect) {
+                        const total = addressbookList.querySelectorAll('.chk-addr-select').length;
+                        const checkedCount = addressbookList.querySelectorAll('.chk-addr-select:checked').length;
+                        allSelect.checked = total === checkedCount;
+                        allSelect.indeterminate = checkedCount > 0 && checkedCount < total;
+                    }
+                });
+            }
+
+            // 이름
+            const tdName = document.createElement('td');
+            tdName.style.padding = '8px';
+            tdName.innerText = item.name || '미정';
+            tdName.style.whiteSpace = 'nowrap';
+            tdName.style.overflow = 'hidden';
+            tdName.style.textOverflow = 'ellipsis';
+            tr.appendChild(tdName);
+
+            // 이메일
+            const tdEmail = document.createElement('td');
+            tdEmail.style.padding = '8px';
+            tdEmail.innerText = item.email;
+            tdEmail.style.whiteSpace = 'nowrap';
+            tdEmail.style.overflow = 'hidden';
+            tdEmail.style.textOverflow = 'ellipsis';
+            tr.appendChild(tdEmail);
+
+            // 그룹
+            const tdGroup = document.createElement('td');
+            tdGroup.style.padding = '8px';
+            
+            const gNames = (item.group_name || '미정').split(',').map(s => s.trim()).filter(Boolean);
+            tdGroup.innerHTML = '';
+            gNames.forEach(name => {
+                const color = state.addressGroupColors[name] || '#3b82f6';
+                const badge = document.createElement('span');
+                badge.style.display = 'inline-block';
+                badge.style.padding = '2px 6px';
+                badge.style.borderRadius = '4px';
+                badge.style.fontSize = '11px';
+                badge.style.fontWeight = '500';
+                badge.style.marginRight = '4px';
+                badge.style.backgroundColor = color + '22'; // 13% opacity background
+                badge.style.color = color;
+                badge.style.border = `1px solid ${color}`;
+                badge.style.maxWidth = '100%';
+                badge.style.overflow = 'hidden';
+                badge.style.textOverflow = 'ellipsis';
+                badge.style.whiteSpace = 'nowrap';
+                badge.style.boxSizing = 'border-box';
+                badge.innerText = name;
+                tdGroup.appendChild(badge);
+            });
+            tr.appendChild(tdGroup);
+
+            // 관리/액션 (Only when selectMode is false)
+            if (!state.addressBookSelectMode) {
+                const tdAction = document.createElement('td');
+                tdAction.style.padding = '8px';
+                tdAction.style.textAlign = 'right';
+                tdAction.style.display = 'flex';
+                tdAction.style.justifyContent = 'flex-end';
+                tdAction.style.gap = '6px';
+
+                if (tab === 'my') {
+                    // 내 주소록에서는 편집과 삭제 가능
+                    const btnEdit = document.createElement('button');
+                    btnEdit.type = 'button';
+                    btnEdit.className = 'btn-admin-action approve';
+                    btnEdit.style.margin = '0';
+                    btnEdit.innerHTML = '<i class="fa-solid fa-pen"></i> 수정';
+                    btnEdit.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openAddressForm(item);
+                    });
+                    tdAction.appendChild(btnEdit);
+
+                    const btnDel = document.createElement('button');
+                    btnDel.type = 'button';
+                    btnDel.className = 'btn-admin-action delete';
+                    btnDel.style.margin = '0';
+                    btnDel.innerHTML = '<i class="fa-solid fa-trash"></i> 삭제';
+                    btnDel.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (await customConfirm(`'${item.name || item.email}' 연락처를 삭제하시겠습니까?`, 'fa-solid fa-triangle-exclamation')) {
+                            deleteAddressBook(item.id);
+                        }
+                    });
+                    tdAction.appendChild(btnDel);
+                } else {
+                    // 보낸 사람 목록에서는 편집(내 주소록 추가) 가능
+                    const btnEdit = document.createElement('button');
+                    btnEdit.type = 'button';
+                    btnEdit.className = 'btn-admin-action approve';
+                    btnEdit.style.margin = '0';
+                    btnEdit.innerHTML = '<i class="fa-solid fa-user-plus"></i> 등록';
+                    btnEdit.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openAddressForm(item);
+                    });
+                    tdAction.appendChild(btnEdit);
+                }
+                tr.appendChild(tdAction);
+            }
+            
+            addressbookList.appendChild(tr);
+        });
+    }
+
+    // 검색 입력 시 실시간 필터링
+    if (addrSearchInput) {
+        addrSearchInput.addEventListener('input', renderAddressBookList);
+    }
+
+    // 주소록 그룹 필터 드롭다운 관련 바인딩 및 함수
+    const filterGroupTrigger = document.getElementById('addr-filter-group-trigger');
+    const filterGroupOptions = document.getElementById('addr-filter-group-options');
+    
+    if (filterGroupTrigger && filterGroupOptions) {
+        filterGroupTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            filterGroupOptions.classList.toggle('hidden');
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (filterGroupOptions && !filterGroupOptions.classList.contains('hidden')) {
+            if (!filterGroupTrigger.contains(e.target) && !filterGroupOptions.contains(e.target)) {
+                filterGroupOptions.classList.add('hidden');
+            }
+        }
+    });
+
+    function initAddressBookFilterGroups() {
+        state.addressBookFilterGroups = state.addressGroups.map(g => g.name);
+        buildFilterGroupDropdown();
+        updateFilterGroupLabel();
+    }
+
+    function updateFilterGroupLabel() {
+        const label = document.getElementById('addr-filter-group-label');
+        if (!label) return;
+        const total = state.addressGroups.length;
+        const checked = state.addressBookFilterGroups.length;
+        if (checked === total) {
+            label.innerText = '모든 그룹';
+        } else if (checked === 0) {
+            label.innerText = '선택 없음';
+        } else if (checked === 1) {
+            label.innerText = state.addressBookFilterGroups[0];
+        } else {
+            label.innerText = `${state.addressBookFilterGroups[0]} 외 ${checked - 1}`;
+        }
+    }
+
+    function buildFilterGroupDropdown() {
+        if (!filterGroupOptions) return;
+        filterGroupOptions.innerHTML = '';
+
+        // 1. "전체" (Select All) 체크박스 생성
+        const allLabel = document.createElement('label');
+        allLabel.style.display = 'flex';
+        allLabel.style.alignItems = 'center';
+        allLabel.style.gap = '8px';
+        allLabel.style.fontSize = '12px';
+        allLabel.style.fontWeight = 'bold';
+        allLabel.style.color = 'var(--text-primary)';
+        allLabel.style.cursor = 'pointer';
+        allLabel.style.padding = '4px 6px';
+        allLabel.style.borderRadius = '4px';
+        allLabel.style.transition = 'background 0.15s';
+        allLabel.addEventListener('mouseenter', () => allLabel.style.background = 'var(--bg-hover)');
+        allLabel.addEventListener('mouseleave', () => allLabel.style.background = 'transparent');
+
+        const allChk = document.createElement('input');
+        allChk.type = 'checkbox';
+        allChk.style.cursor = 'pointer';
+        
+        const totalGroups = state.addressGroups.length;
+        const checkedCount = state.addressBookFilterGroups.length;
+        allChk.checked = totalGroups === checkedCount && totalGroups > 0;
+        allChk.indeterminate = checkedCount > 0 && checkedCount < totalGroups;
+
+        allChk.addEventListener('change', () => {
+            if (allChk.checked) {
+                state.addressBookFilterGroups = state.addressGroups.map(g => g.name);
+                updateFilterGroupLabel();
+                
+                // 하위 체크박스 동기화
+                const checkboxes = filterGroupOptions.querySelectorAll('.addr-filter-group-chk');
+                checkboxes.forEach(chk => {
+                    chk.checked = true;
+                });
+                renderAddressBookList();
+            } else {
+                // 최소 1개 선택 의무화: 전체 취소 방지
+                allChk.checked = true;
+                showToast('최소 하나의 그룹은 선택해야 합니다.');
+            }
+        });
+
+        const allSpan = document.createElement('span');
+        allSpan.innerText = '전체';
+
+        allLabel.appendChild(allChk);
+        allLabel.appendChild(allSpan);
+        filterGroupOptions.appendChild(allLabel);
+
+        // 2. 구분선 추가
+        const divider = document.createElement('div');
+        divider.style.borderBottom = '1px solid var(--border-color)';
+        divider.style.margin = '4px 0';
+        filterGroupOptions.appendChild(divider);
+
+        // 3. 하위 그룹 체크박스들 생성
+        state.addressGroups.forEach(g => {
+            const label = document.createElement('label');
+            label.style.display = 'flex';
+            label.style.alignItems = 'center';
+            label.style.gap = '8px';
+            label.style.fontSize = '12px';
+            label.style.color = 'var(--text-primary)';
+            label.style.cursor = 'pointer';
+            label.style.padding = '4px 6px';
+            label.style.borderRadius = '4px';
+            label.style.transition = 'background 0.15s';
+            label.addEventListener('mouseenter', () => label.style.background = 'var(--bg-hover)');
+            label.addEventListener('mouseleave', () => label.style.background = 'transparent');
+
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.value = g.name;
+            chk.className = 'addr-filter-group-chk';
+            chk.checked = state.addressBookFilterGroups.includes(g.name);
+            chk.style.cursor = 'pointer';
+            chk.addEventListener('change', () => {
+                if (chk.checked) {
+                    if (!state.addressBookFilterGroups.includes(g.name)) {
+                        state.addressBookFilterGroups.push(g.name);
+                    }
+                } else {
+                    if (state.addressBookFilterGroups.length <= 1) {
+                        chk.checked = true;
+                        showToast('최소 하나의 그룹은 선택해야 합니다.');
+                        return;
+                    }
+                    state.addressBookFilterGroups = state.addressBookFilterGroups.filter(x => x !== g.name);
+                }
+
+                // 전체 체크박스 상태 갱신
+                const curChecked = state.addressBookFilterGroups.length;
+                allChk.checked = totalGroups === curChecked;
+                allChk.indeterminate = curChecked > 0 && curChecked < totalGroups;
+
+                updateFilterGroupLabel();
+                renderAddressBookList();
+            });
+
+            const span = document.createElement('span');
+            span.innerText = g.name;
+
+            label.appendChild(chk);
+            label.appendChild(span);
+            filterGroupOptions.appendChild(label);
+        });
+    }
+
+    // 새 연락처 추가 버튼 클릭 시
+    if (btnAddAddress) {
+        btnAddAddress.addEventListener('click', () => {
+            openAddressForm();
+        });
+    }
+
+    // 주소록 그룹 드롭다운 리스트 채우기 (단일 선택 드롭다운 방식)
+    async function loadAddressGroupOptions(selectedValue = '미정') {
+        const optionsDiv = document.getElementById('addr-group-options');
+        const labelSpan = document.getElementById('addr-group-label');
+        const hiddenInput = document.getElementById('addr-group');
+        
+        if (!optionsDiv || !labelSpan || !hiddenInput) return;
+        optionsDiv.innerHTML = '<div style="padding: 8px 12px; color: var(--text-secondary); font-size: 13px;">로딩 중...</div>';
+        
+        try {
+            const res = await apiRequest('list_address_groups');
+            if (res.success) {
+                const groups = res.address_groups || [];
+                optionsDiv.innerHTML = '';
+                
+                let selectedGroup = (selectedValue || '미정').trim();
+                hiddenInput.value = selectedGroup;
+                labelSpan.innerText = selectedGroup;
+
+                const renderOptionItem = (gName, gColor) => {
+                    const opt = document.createElement('div');
+                    opt.style.display = 'flex';
+                    opt.style.alignItems = 'center';
+                    opt.style.gap = '10px';
+                    opt.style.cursor = 'pointer';
+                    opt.style.fontSize = '13px';
+                    opt.style.padding = '8px 12px';
+                    opt.style.transition = 'background 0.2s';
+                    opt.style.userSelect = 'none';
+
+                    opt.addEventListener('mouseenter', () => {
+                        opt.style.background = 'var(--bg-hover)';
+                    });
+                    opt.addEventListener('mouseleave', () => {
+                        opt.style.background = 'transparent';
+                    });
+
+                    if (gName === selectedGroup) {
+                        opt.style.fontWeight = 'bold';
+                        opt.style.color = 'var(--color-primary)';
+                        opt.style.background = 'rgba(59, 130, 246, 0.08)';
+                    }
+
+                    const color = gColor || '#3b82f6';
+                    const colorIcon = document.createElement('i');
+                    colorIcon.className = 'fa-solid fa-circle';
+                    colorIcon.style.color = color;
+                    colorIcon.style.fontSize = '8px';
+
+                    const textSpan = document.createElement('span');
+                    textSpan.innerText = gName;
+                    textSpan.style.flexGrow = '1';
+
+                    opt.appendChild(colorIcon);
+                    opt.appendChild(textSpan);
+
+                    if (gName === selectedGroup) {
+                        const checkIcon = document.createElement('i');
+                        checkIcon.className = 'fa-solid fa-check';
+                        checkIcon.style.fontSize = '12px';
+                        checkIcon.style.color = 'var(--color-primary)';
+                        opt.appendChild(checkIcon);
+                    }
+
+                    opt.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        hiddenInput.value = gName;
+                        labelSpan.innerText = gName;
+                        optionsDiv.classList.add('hidden');
+                    });
+
+                    optionsDiv.appendChild(opt);
+                };
+
+                groups.forEach(g => {
+                    renderOptionItem(g.name, g.color);
+                });
+            } else {
+                optionsDiv.innerHTML = '<div style="padding: 8px 12px; color: var(--color-danger); font-size: 13px;">로드 실패</div>';
+            }
+        } catch (err) {
+            console.error('Error loading address group options:', err);
+            optionsDiv.innerHTML = '<div style="padding: 8px 12px; color: var(--color-danger); font-size: 13px;">에러 발생</div>';
+        }
+    }
+
+    // 커스텀 드롭다운 토글 리스너 및 닫기 등록
+    const addrGroupTrigger = document.getElementById('addr-group-trigger');
+    const addrGroupOptions = document.getElementById('addr-group-options');
+    
+    if (addrGroupTrigger && addrGroupOptions) {
+        addrGroupTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            addrGroupOptions.classList.toggle('hidden');
+        });
+    }
+    
+    // 바깥 클릭 시 드롭다운 닫기
+    document.addEventListener('click', (e) => {
+        if (addrGroupOptions && !addrGroupOptions.classList.contains('hidden')) {
+            if (!addrGroupTrigger.contains(e.target) && !addrGroupOptions.contains(e.target)) {
+                addrGroupOptions.classList.add('hidden');
+            }
+        }
+    });
+
+    // 연락처 작성/수정 폼 열기
+    async function openAddressForm(item = null) {
+        if (!addressFormModal) return;
+        const formTitle = document.getElementById('addr-form-title');
+        const inputId = document.getElementById('addr-id');
+        const inputName = document.getElementById('addr-name');
+        const inputEmail = document.getElementById('addr-email');
+
+        addressFormModal.classList.remove('hidden');
+
+        // 그룹 드롭다운 로딩 및 매칭값 선택
+        await loadAddressGroupOptions(item ? item.group_name : '미정');
+
+        if (item) {
+            if (formTitle) formTitle.innerHTML = '<i class="fa-solid fa-address-card"></i> 연락처 편집';
+            if (inputId) inputId.value = item.id || '';
+            if (inputName) inputName.value = item.name || '';
+            if (inputEmail) inputEmail.value = item.email || '';
+            if (inputEmail) inputEmail.readOnly = false;
+        } else {
+            if (formTitle) formTitle.innerHTML = '<i class="fa-solid fa-user-plus"></i> 새 연락처 추가';
+            if (inputId) inputId.value = '';
+            if (inputName) inputName.value = '';
+            if (inputEmail) inputEmail.value = '';
+            if (inputEmail) inputEmail.readOnly = false;
+        }
+    }
+
+    // 연락처 폼 닫기
+    function closeAddressForm() {
+        if (addressFormModal) addressFormModal.classList.add('hidden');
+    }
+
+    // 연락처 저장 submit
+    if (formAddress) {
+        formAddress.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('addr-id').value;
+            const name = document.getElementById('addr-name').value.trim();
+            const email = document.getElementById('addr-email').value.trim();
+            const group_name = document.getElementById('addr-group').value || '미정';
+
+            if (!name || !email) {
+                showToast('이름과 이메일을 입력해 주세요.');
+                return;
+            }
+
+            showToast('주소록을 저장하는 중...');
+            const res = await apiRequest('save_address', 'POST', { name, email, group_name });
+            showToast(res.message);
+            
+            if (res.success) {
+                closeAddressForm();
+                loadAddressBookData(); // 주소록 재로드
+            }
+        });
+    }
+
+    // 연락처 삭제
+    async function deleteAddressBook(id) {
+        showToast('연락처를 삭제하는 중...');
+        const res = await apiRequest('delete_address', 'POST', { id });
+        showToast(res.message);
+        if (res.success) {
+            loadAddressBookData();
+        }
+    }
+
+    // 주소록 그룹 관리 모달 버튼 바인딩 및 이벤트 정의
+    if (btnManageAddrGroups && addressGroupsModal) {
+        btnManageAddrGroups.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            addressGroupsModal.classList.remove('hidden');
+            loadAddressGroupsList();
+        });
+    }
+
+    // 그룹 목록 렌더링
+    async function loadAddressGroupsList() {
+        if (!addrGroupsList) return;
+        addrGroupsList.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 12px;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
+        try {
+            const res = await apiRequest('list_address_groups');
+            if (res.success) {
+                const groups = res.address_groups || [];
+                addrGroupsList.innerHTML = '';
+                groups.forEach(g => {
+                    const isMijeong = g.name === '미정';
+                    const tr = document.createElement('tr');
+                    tr.dataset.id = g.id;
+                    tr.dataset.name = g.name;
+                    tr.style.borderBottom = '1px solid var(--border-color)';
+
+                    if (!isMijeong) {
+                        tr.draggable = true;
+                        tr.className = 'group-drag-item';
+                        tr.style.cursor = 'pointer'; // 손가락 커서로 드래그 가능하게
+                    } else {
+                        tr.className = 'group-static-item';
+                    }
+
+                    // 대표 색상 (사람 아이콘으로 대신)
+                    const color = g.color || '#3b82f6';
+                    const personIcon = `<i class="fa-solid fa-user address-group-icon-clickable" style="color: ${color}; margin-right: 8px; cursor: pointer; font-size: 14px; vertical-align: middle;" data-id="${g.id}"></i>`;
+
+                    const renameButton = !isMijeong 
+                        ? `<button class="btn-group-rename btn-address-group-rename" style="margin: 0 0 0 8px; font-size: 11px;" data-id="${g.id}" data-name="${escapeHtml(g.name)}">변경</button>` 
+                        : '';
+
+                    const nameCell = document.createElement('td');
+                    nameCell.style.padding = '8px 12px';
+                    nameCell.style.display = 'flex';
+                    nameCell.style.alignItems = 'center';
+                    nameCell.innerHTML = `
+                        ${personIcon}
+                        <span class="group-name-text" style="vertical-align: middle;">${escapeHtml(g.name)}</span>
+                        ${renameButton}
+                    `;
+                    tr.appendChild(nameCell);
+
+                    const actionCell = document.createElement('td');
+                    actionCell.style.padding = '8px 12px';
+                    actionCell.style.textAlign = 'right';
+
+                    if (!isMijeong) {
+                        const btnDel = document.createElement('button');
+                        btnDel.type = 'button';
+                        btnDel.className = 'btn-admin-action delete';
+                        btnDel.style.margin = '0';
+                        btnDel.innerHTML = '<i class="fa-solid fa-trash"></i> 삭제';
+                        btnDel.addEventListener('click', async (evt) => {
+                            evt.stopPropagation();
+                            if (!await customConfirm(`'${g.name}' 그룹을 삭제하시겠습니까?\n해당 그룹의 연락처들은 '미정' 그룹으로 변경됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
+                            
+                            showToast('그룹을 삭제하는 중...');
+                            const delRes = await apiRequest('delete_address_group', 'POST', { id: g.id });
+                            showToast(delRes.message);
+                            if (delRes.success) {
+                                loadAddressGroupsList();
+                                loadAddressBookData(); // Main address book refresh
+                            }
+                        });
+                        actionCell.appendChild(btnDel);
+                    } else {
+                        actionCell.innerHTML = '<span style="color: var(--text-muted); font-size: 11px;">보호됨</span>';
+                    }
+                    tr.appendChild(actionCell);
+
+                    // Drag and Drop Event Listeners (Only for non-system groups)
+                    if (!isMijeong) {
+                        tr.addEventListener('dragstart', (e) => {
+                            tr.classList.add('dragging');
+                            e.dataTransfer.setData('text/plain', g.id);
+                            e.dataTransfer.effectAllowed = 'move';
+                        });
+
+                        tr.addEventListener('dragend', () => {
+                            tr.classList.remove('dragging');
+                            saveAddressGroupOrder();
+                        });
+
+                        tr.addEventListener('dragover', (e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                            const draggingItem = addrGroupsList.querySelector('.dragging');
+                            if (draggingItem && draggingItem !== tr) {
+                                const bounding = tr.getBoundingClientRect();
+                                const offset = e.clientY - bounding.top;
+                                if (offset > bounding.height / 2) {
+                                    tr.after(draggingItem);
+                                } else {
+                                    tr.before(draggingItem);
+                                }
+                            }
+                        });
+                    }
+
+                    // Color Picker Logic
+                    tr.querySelector('.address-group-icon-clickable').addEventListener('click', (evt) => {
+                        evt.stopPropagation();
+                        const groupId = evt.currentTarget.dataset.id;
+                        const rect = evt.currentTarget.getBoundingClientRect();
+
+                        const tagColorPopover = document.getElementById('tag-color-popover');
+                        tagColorPopover.classList.remove('hidden');
+                        tagColorPopover.style.top = `${rect.bottom + window.scrollY + 5}px`;
+                        tagColorPopover.style.left = `${rect.left + window.scrollX}px`;
+
+                        renderAddressGroupColorPicker(groupId);
+                    });
+
+                    // Rename Logic
+                    const renameBtn = tr.querySelector('.btn-address-group-rename');
+                    if (renameBtn) {
+                        renameBtn.addEventListener('click', (evt) => {
+                            evt.stopPropagation();
+                            const id = evt.currentTarget.dataset.id;
+                            const name = evt.currentTarget.dataset.name;
+                            
+                            const renameIdInput = document.getElementById('rename-address-group-id');
+                            const renameNewNameInput = document.getElementById('rename-address-group-new-name');
+                            const addressGroupRenameModal = document.getElementById('address-group-rename-modal');
+                            
+                            if (renameIdInput && renameNewNameInput && addressGroupRenameModal) {
+                                renameIdInput.value = id;
+                                renameNewNameInput.value = name;
+                                addressGroupRenameModal.classList.remove('hidden');
+                                setTimeout(() => renameNewNameInput.focus(), 100);
+                            }
+                        });
+                    }
+
+                    addrGroupsList.appendChild(tr);
+                });
+            } else {
+                addrGroupsList.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 12px; color: var(--color-danger);">로드 실패</td></tr>';
+            }
+        } catch (err) {
+            console.error('Error loading address groups list:', err);
+            addrGroupsList.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 12px; color: var(--color-danger);">에러 발생</td></tr>';
+        }
+    }
+
+    // 그룹 순서 저장
+    async function saveAddressGroupOrder() {
+        const order = [];
+        addrGroupsList.querySelectorAll('tr').forEach(tr => {
+            if (tr.dataset.id) {
+                order.push(tr.dataset.id);
+            }
+        });
+        const res = await apiRequest('update_address_group_order', 'POST', { order: JSON.stringify(order) });
+        if (res.success) {
+            loadAddressBookData();
+        } else {
+            showToast(res.message);
+        }
+    }
+
+    // 그룹 색상 선택기 렌더링
+    function renderAddressGroupColorPicker(groupId) {
+        const colors = [
+            '#ef4444', '#f97316', '#f59e0b', '#10b981', '#3b82f6',
+            '#6366f1', '#8b5cf6', '#ffffff', '#71717a', '#000000'
+        ];
+
+        const tagColorGrid = document.getElementById('tag-color-grid');
+        const tagColorPopover = document.getElementById('tag-color-popover');
+
+        tagColorGrid.innerHTML = '';
+        colors.forEach(color => {
+            const item = document.createElement('div');
+            item.className = 'tag-color-item';
+            item.style.backgroundColor = color;
+            item.addEventListener('click', async () => {
+                const res = await apiRequest('set_address_group_color', 'POST', { id: groupId, color: color });
+                if (res.success) {
+                    loadAddressGroupsList();
+                    loadAddressBookData();
+                    tagColorPopover.classList.add('hidden');
+                }
+            });
+            tagColorGrid.appendChild(item);
+        });
+    }
+
+    // 그룹 추가 서브밋
+    if (formAddAddrGroup) {
+        formAddAddrGroup.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = newAddrGroupName.value.trim();
+            if (!name) return;
+            showToast('그룹을 추가하는 중...');
+            const res = await apiRequest('save_address_group', 'POST', { name });
+            showToast(res.message);
+            if (res.success) {
+                newAddrGroupName.value = '';
+                loadAddressGroupsList();
+                loadAddressBookData();
+            }
+        });
+    }
+
+    // 그룹 이름 변경 서브밋
+    const formRenameAddressGroup = document.getElementById('form-rename-address-group');
+    const addressGroupRenameModal = document.getElementById('address-group-rename-modal');
+    const renameAddressGroupId = document.getElementById('rename-address-group-id');
+    const renameAddressGroupNewName = document.getElementById('rename-address-group-new-name');
+
+    if (formRenameAddressGroup) {
+        formRenameAddressGroup.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = renameAddressGroupId.value;
+            const newName = renameAddressGroupNewName.value.trim();
+            if (!newName || !id) {
+                if (addressGroupRenameModal) addressGroupRenameModal.classList.add('hidden');
+                return;
+            }
+            
+            showToast('그룹 이름을 변경하는 중...');
+            const res = await apiRequest('rename_address_group', 'POST', { id: id, name: newName });
+            showToast(res.message);
+            
+            if (res.success) {
+                if (addressGroupRenameModal) addressGroupRenameModal.classList.add('hidden');
+                loadAddressGroupsList();
+                loadAddressBookData();
+            }
+        });
+    }
+
+    // 바깥 클릭 시 모달 닫기 등록
+    setupClickOutside(addressBookModal);
+    setupClickOutside(addressFormModal);
+    setupClickOutside(addressGroupsModal);
+    setupClickOutside(addressGroupRenameModal);
+
+
+    // --------------------------------------------------
+    // RECIPIENT AUTOCOMPLETE (받는 사람 이메일 주소 자동완성)
+    // --------------------------------------------------
+    
+    // 이메일 작성 시 자동완성 렌더링 함수
+    function renderAutocomplete(search) {
+        if (!autocompleteList) return;
+        if (!search) {
+            autocompleteList.classList.add('hidden');
+            return;
+        }
+
+        search = search.toLowerCase();
+        
+        // 내 주소록 + 보낸 사람 주소록에서 매칭 대상 찾음
+        // 중복 제거 및 검색 매칭
+        const allContacts = [];
+        const seenEmails = new Set();
+
+        const addUniqueContacts = (list) => {
+            list.forEach(c => {
+                if (!c.email) return;
+                const emailLower = c.email.toLowerCase();
+                if (!seenEmails.has(emailLower)) {
+                    seenEmails.add(emailLower);
+                    allContacts.push(c);
+                }
+            });
+        };
+
+        addUniqueContacts(state.addressBookListMy);
+        addUniqueContacts(state.addressBookListReceived);
+
+        const filtered = allContacts.filter(c => {
+            const name = (c.name || '').toLowerCase();
+            const email = (c.email || '').toLowerCase();
+            return name.includes(search) || email.includes(search);
+        });
+
+        if (filtered.length === 0) {
+            autocompleteList.classList.add('hidden');
+            return;
+        }
+
+        autocompleteList.innerHTML = '';
+        filtered.slice(0, 10).forEach(contact => {
+            const item = document.createElement('div');
+            item.style.padding = '8px 12px';
+            item.style.cursor = 'pointer';
+            item.style.borderBottom = '1px solid var(--border-color)';
+            item.style.fontSize = '13px';
+            item.style.display = 'flex';
+            item.style.flexDirection = 'column';
+            item.style.gap = '2px';
+            
+            // 호버 스타일링
+            item.addEventListener('mouseenter', () => {
+                item.style.background = 'var(--border-color)';
+            });
+            item.addEventListener('mouseleave', () => {
+                item.style.background = 'transparent';
+            });
+
+            const nameSpan = document.createElement('span');
+            nameSpan.style.fontWeight = 'bold';
+            nameSpan.style.color = 'var(--text-primary)';
+            nameSpan.innerText = contact.name || '미정';
+
+            const emailSpan = document.createElement('span');
+            emailSpan.style.color = 'var(--text-secondary)';
+            emailSpan.style.fontSize = '11px';
+            emailSpan.innerText = `${contact.email} (${contact.group_name || '미정'})`;
+
+            item.appendChild(nameSpan);
+            item.appendChild(emailSpan);
+
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (mailToInput) {
+                    const parts = mailToInput.value.split(',');
+                    parts[parts.length - 1] = contact.email;
+                    mailToInput.value = parts.map(p => p.trim()).join(', ') + ', ';
+                    mailToInput.focus();
+                }
+                autocompleteList.classList.add('hidden');
+            });
+
+            autocompleteList.appendChild(item);
+        });
+
+        autocompleteList.classList.remove('hidden');
+    }
+
+    // 받는 사람 입력창에 입력 이벤트 등록
+    if (mailToInput) {
+        mailToInput.addEventListener('input', (e) => {
+            let value = e.target.value;
+            // 실시간으로 세미콜론(;)을 콤마(,)로 자동 변환하여 사용자 편의성 제공
+            if (value.includes(';')) {
+                value = value.replace(/;/g, ',');
+                e.target.value = value;
+            }
+            const parts = value.split(',');
+            const lastPart = parts[parts.length - 1].trim();
+            renderAutocomplete(lastPart);
+        });
+
+        // 주소록 데이터는 작성 창 포커스 또는 페이지 첫 로드 시 사전 수집하도록 처리
+        mailToInput.addEventListener('focus', () => {
+            // 백그라운드에서 조용히 로딩
+            apiRequest('list_address_book').then(myRes => {
+                if (myRes.success) state.addressBookListMy = myRes.address_book || [];
+            });
+            apiRequest('list_received_senders').then(recvRes => {
+                if (recvRes.success) state.addressBookListReceived = recvRes.senders || [];
+            });
+        });
+    }
+
+    // 바깥 영역 클릭 시 자동완성 닫기
+    document.addEventListener('click', (e) => {
+        if (autocompleteList && !autocompleteList.classList.contains('hidden')) {
+            if (!mailToInput.contains(e.target) && !autocompleteList.contains(e.target)) {
+                autocompleteList.classList.add('hidden');
+            }
+        }
+    });
 
     // Run App!
     initApp();

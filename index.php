@@ -276,7 +276,13 @@
             <form id="form-compose" class="compose-form">
                 <div class="compose-field">
                     <label for="mail-to">받는 사람</label>
-                    <input type="email" id="mail-to" name="to" placeholder="recipient@example.com" required>
+                    <div style="display: flex; gap: 8px; flex-grow: 1; align-items: center; position: relative;">
+                        <input type="email" id="mail-to" name="to" placeholder="recipient@example.com" required multiple style="flex-grow: 1; height: 36px; box-sizing: border-box;">
+                        <button type="button" id="btn-addressbook-popup" title="주소록 선택" style="padding: 6px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; white-space: nowrap; width: 36px; height: 36px; box-sizing: border-box;">
+                            <i class="fa-solid fa-address-book"></i>
+                        </button>
+                        <div id="autocomplete-list" class="autocomplete-items hidden" style="position: absolute; top: 38px; left: 0; width: 320px; max-width: 100%; background: var(--bg-surface-solid); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
+                    </div>
                 </div>
                 <div class="compose-field">
                     <label for="mail-subject">제목</label>
@@ -823,7 +829,7 @@
 
     <!-- EXTERNAL MAIL SETTINGS MODAL -->
     <div id="external-mail-modal" class="tags-overlay hidden">
-        <div class="tags-card external-mail-card" style="width: 600px; max-height: 85vh; height: 590px;">
+        <div class="tags-card external-mail-card" style="width: 600px; max-height: 85vh; height: 595px;">
             <div class="tags-header" style="flex-shrink: 0;">
                 <h3><i class="fa-solid fa-at"></i> 외부 메일 설정</h3>
             </div>
@@ -832,7 +838,7 @@
                 <div class="external-mail-list-pane" style="width: 200px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; background: rgba(255, 255, 255, 0.02); flex-shrink: 0;">
                     <div class="pane-action-bar" style="padding: 16px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
                         <span style="font-weight: bold; font-size: 13px; color: var(--text-primary);">계정 목록</span>
-                        <button type="button" id="btn-add-external-mail" class="btn-submit" style="padding: 0; font-size: 11px; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; min-width: 24px; flex-shrink: 0;" title="계정 추가">
+                        <button type="button" id="btn-add-external-mail" class="btn-submit" style="margin: 0; padding: 0; font-size: 11px; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; min-width: 24px; flex-shrink: 0; align-self: auto;" title="계정 추가">
                             <i class="fa-solid fa-plus"></i>
                         </button>
                     </div>
@@ -858,21 +864,6 @@
             <div class="settings-header">
                 <h3><i class="fa-solid fa-gear"></i> 개인 설정</h3>
                 <div class="settings-header-actions">
-                    <button type="button" id="btn-manage-tags" class="btn-icon-settings" title="폴더 관리">
-                        <i class="fa-solid fa-folder-tree"></i>
-                    </button>
-                    <button type="button" id="btn-manage-filters" class="btn-icon-settings" title="메일 필터링">
-                        <i class="fa-solid fa-filter"></i>
-                    </button>
-                    <button type="button" id="btn-manage-signature" class="btn-icon-settings" title="서명 설정">
-                        <i class="fa-solid fa-signature"></i>
-                    </button>
-                    <button type="button" id="btn-manage-external-mail" class="btn-icon-settings" title="외부 메일 설정">
-                        <i class="fa-solid fa-at"></i>
-                    </button>
-                    <button type="button" id="btn-admin" class="btn-icon-settings hidden" title="회원 관리">
-                        <i class="fa-solid fa-user-gear"></i>
-                    </button>
                     <button type="button" id="btn-logout" class="btn-icon-settings btn-logout-settings" title="로그아웃">
                         <span class="logout-icon-wrapper">
                             <span class="logout-bracket"></span>
@@ -943,6 +934,31 @@
                     </div>
                 </div>
 
+                <!-- 기타 설정 -->
+                <div class="form-group etc-group" style="margin-top: 20px;">
+                    <label>기타 설정</label>
+                    <div class="etc-settings-row" style="display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; width: 100%;">
+                        <button type="button" id="btn-manage-tags" class="btn-etc-settings" title="폴더 관리" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 13px; transition: all 0.2s; height: 32px;">
+                            <i class="fa-solid fa-folder-tree" style="color: var(--color-primary);"></i>
+                        </button>
+                        <button type="button" id="btn-manage-filters" class="btn-etc-settings" title="메일 필터링" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 13px; transition: all 0.2s; height: 32px;">
+                            <i class="fa-solid fa-filter" style="color: var(--color-primary);"></i>
+                        </button>
+                        <button type="button" id="btn-manage-signature" class="btn-etc-settings" title="서명 설정" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 13px; transition: all 0.2s; height: 32px;">
+                            <i class="fa-solid fa-signature" style="color: var(--color-primary);"></i>
+                        </button>
+                        <button type="button" id="btn-manage-addressbook" class="btn-etc-settings" title="주소록" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 13px; transition: all 0.2s; height: 32px;">
+                            <i class="fa-solid fa-address-book" style="color: var(--color-primary);"></i>
+                        </button>
+                        <button type="button" id="btn-manage-external-mail" class="btn-etc-settings" title="메일 설정" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 13px; transition: all 0.2s; height: 32px;">
+                            <i class="fa-solid fa-at" style="color: var(--color-primary);"></i>
+                        </button>
+                        <button type="button" id="btn-admin" class="btn-etc-settings hidden" title="회원 관리" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 13px; transition: all 0.2s; height: 32px;">
+                            <i class="fa-solid fa-user-gear" style="color: var(--color-primary);"></i>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- 저장 버튼 (오른쪽 정렬) -->
                 <div class="settings-footer">
                     <button type="submit" class="btn-submit btn-save-settings">설정 저장</button>
@@ -996,6 +1012,142 @@
                     </div>
                 </form>
             </div>
+        </div>
+    </div>
+
+    <!-- ADDRESS BOOK MODAL -->
+    <div id="addressbook-modal" class="tags-overlay hidden" style="z-index: 200;">
+        <div class="tags-card" style="width: 455px; max-height: 85vh; height: 600px; display: flex; flex-direction: column;">
+            <div class="tags-header" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border-color);">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;"><i class="fa-solid fa-address-book"></i> 주소록</h3>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" id="btn-add-address" class="btn-icon-settings" title="새 연락처 추가">
+                        <i class="fa-solid fa-user-plus"></i>
+                    </button>
+                    <button type="button" id="btn-manage-addr-groups" class="btn-icon-settings" title="주소록 그룹 관리"><i class="fa-solid fa-users-gear"></i></button>
+                </div>
+            </div>
+            
+            <!-- 주소록 탭 (카테고리 2개) -->
+            <div class="addressbook-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); flex-shrink: 0; background: var(--bg-secondary);">
+                <button type="button" class="addr-tab-btn active" data-tab="my" style="flex: 1; padding: 12px; background: none; border: none; border-bottom: 2px solid var(--color-primary); color: var(--text-primary); font-weight: bold; cursor: pointer; text-align: center; font-size: 14px;">내 주소록</button>
+                <button type="button" class="addr-tab-btn" data-tab="received" style="flex: 1; padding: 12px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); cursor: pointer; text-align: center; font-size: 14px;">보낸 사람</button>
+            </div>
+
+            <!-- 주소록 상단 액션 바 -->
+            <div class="addressbook-actions" style="padding: 12px 20px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid var(--border-color); flex-shrink: 0;">
+                <input type="text" id="addr-search" placeholder="이름 또는 이메일 검색..." style="flex-grow: 1; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); font-size: 13px; height: 32px; box-sizing: border-box; min-width: 0;">
+                <div class="custom-dropdown hidden" id="addr-filter-group-dropdown" style="position: relative; width: 120px; flex-shrink: 0; display: none;">
+                    <button type="button" id="addr-filter-group-trigger" style="width: 100%; padding: 0 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 13px; box-sizing: border-box; height: 32px;">
+                        <span id="addr-filter-group-label" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">모든 그룹</span>
+                        <i class="fa-solid fa-caret-down" style="color: var(--text-secondary); font-size: 12px;"></i>
+                    </button>
+                    <div id="addr-filter-group-options" class="hidden" style="position: absolute; top: 100%; right: 0; width: 180px; background: var(--bg-surface-solid); border: 1px solid var(--border-color); border-radius: var(--radius-sm); max-height: 250px; overflow-y: auto; z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.15); margin-top: 4px; padding: 8px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+                        <!-- Dynamic checkboxes for groups -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 주소록 목록 영역 -->
+            <div class="addressbook-body-wrapper" style="flex-grow: 1; overflow-y: auto; padding: 12px 20px;">
+                <table class="addressbook-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; color: var(--text-primary); table-layout: fixed;">
+                    <thead id="addressbook-thead">
+                        <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary);">
+                            <th style="padding: 8px; width: 80px;">이름</th>
+                            <th style="padding: 8px;">이메일</th>
+                            <th style="padding: 8px; width: 55px;">그룹</th>
+                            <th style="padding: 8px; width: 110px; text-align: right;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="addressbook-list">
+                        <!-- 연락처 목록 동적 렌더링 -->
+                    </tbody>
+                </table>
+            </div>
+            <!-- 주소록 footer (선택 모드일 때만 표시) -->
+            <div id="addressbook-footer" class="hidden" style="padding: 12px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; flex-shrink: 0; background: var(--bg-secondary);">
+                <button type="button" id="btn-addressbook-confirm" class="btn-submit" style="margin: 0; padding: 8px 20px;">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADDRESS ADD/EDIT FORM MODAL -->
+    <div id="address-form-modal" class="tags-overlay hidden" style="z-index: 210;">
+        <div class="tags-card" style="width: 280px; padding: 20px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3); overflow: visible;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 id="addr-form-title" style="margin: 0;"><i class="fa-solid fa-address-card"></i> 연락처 편집</h3>
+            </div>
+            <form id="form-address">
+                <input type="hidden" id="addr-id">
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label for="addr-name" style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">이름</label>
+                    <input type="text" id="addr-name" required placeholder="이름 입력" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;">
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label for="addr-email" style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">이메일 주소</label>
+                    <input type="email" id="addr-email" required placeholder="example@onto.kr" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;">
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">그룹</label>
+                    <div class="custom-dropdown" id="addr-group-dropdown" style="position: relative; width: 100%;">
+                        <button type="button" id="addr-group-trigger" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 13px; box-sizing: border-box; height: 38px;">
+                            <span id="addr-group-label" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">미정</span>
+                            <i class="fa-solid fa-caret-down" style="color: var(--text-secondary); font-size: 12px;"></i>
+                        </button>
+                        <div id="addr-group-options" class="hidden" style="position: absolute; top: 100%; left: 0; right: 0; background: var(--bg-surface-solid); border: 1px solid var(--border-color); border-radius: var(--radius-sm); max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.15); margin-top: 4px; padding: 4px 0; box-sizing: border-box;">
+                            <!-- Dynamic options -->
+                        </div>
+                        <input type="hidden" id="addr-group" name="group_name" value="미정">
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                    <button type="submit" class="btn-submit" style="margin: 0; min-width: auto; padding: 8px 20px;">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ADDRESS GROUP MANAGE MODAL -->
+    <div id="address-groups-modal" class="tags-overlay hidden" style="z-index: 215;">
+        <div class="tags-card" style="width: 320px; padding: 20px; box-sizing: border-box; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; width: 100%; box-sizing: border-box;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;"><i class="fa-solid fa-users-gear"></i> 주소록 그룹 관리</h3>
+            </div>
+            <form id="form-add-addr-group" style="display: flex; gap: 8px; margin-bottom: 16px; width: 100%; box-sizing: border-box;">
+                <input type="text" id="new-addr-group-name" required placeholder="새 그룹 이름 입력" style="flex-grow: 1; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;">
+                <button type="submit" class="btn-submit" style="margin: 0; padding: 0 12px; min-width: auto; font-size: 12px; height: 32px; box-sizing: border-box; white-space: nowrap;">추가</button>
+            </form>
+            <div style="border: 1px solid var(--border-color); border-radius: 4px; max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.1); width: 100%; box-sizing: border-box;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; table-layout: fixed;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary); background: var(--bg-secondary);">
+                            <th style="padding: 8px 12px;">그룹 이름</th>
+                            <th style="padding: 8px 12px; width: 60px; text-align: right;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="addr-groups-list">
+                        <!-- 동적 로드 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADDRESS GROUP RENAME MODAL -->
+    <div id="address-group-rename-modal" class="tag-create-overlay hidden" style="z-index: 220;">
+        <div class="tag-create-card" style="width: 320px; padding: 20px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);">
+            <div class="tag-create-header" style="margin-bottom: 16px;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;"><i class="fa-solid fa-pen-to-square"></i> 그룹 이름 변경</h3>
+            </div>
+            <form id="form-rename-address-group" class="tag-create-form-modal" style="display: flex; flex-direction: column; gap: 12px;">
+                <input type="hidden" id="rename-address-group-id">
+                <div class="form-group" style="margin: 0;">
+                    <input type="text" id="rename-address-group-new-name" placeholder="새 이름을 입력하세요." required autocomplete="off" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); box-sizing: border-box;">
+                </div>
+                <div class="tag-create-footer" style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                    <button type="submit" class="btn-submit" style="margin: 0; padding: 8px 16px;">변경</button>
+                </div>
+            </form>
         </div>
     </div>
 
