@@ -310,12 +310,11 @@
                             <!-- Font select -->
                             <div class="toolbar-dropdown-wrapper" id="dropdown-font-wrapper">
                                 <button type="button" class="toolbar-dropdown-trigger" id="btn-toolbar-font">
-                                    <span class="trigger-label">기본 폰트</span>
+                                    <span class="trigger-label">맑은 고딕</span>
                                     <i class="fa-solid fa-chevron-down caret-icon"></i>
                                 </button>
                                 <div class="toolbar-dropdown-menu font-menu hidden">
-                                    <button type="button" class="font-item active" data-font="" style="font-family: var(--font-sans);">기본 폰트</button>
-                                    <button type="button" class="font-item" data-font="malgungothic" style="font-family: 'Malgun Gothic', '맑은 고딕', sans-serif;">맑은 고딕</button>
+                                    <button type="button" class="font-item active" data-font="" style="font-family: 'Malgun Gothic', '맑은 고딕', sans-serif;">맑은 고딕</button>
                                     <button type="button" class="font-item" data-font="dotum" style="font-family: 'Dotum', '돋움', sans-serif;">돋움</button>
                                     <button type="button" class="font-item" data-font="gulim" style="font-family: 'Gulim', '굴림', sans-serif;">굴림</button>
                                     <button type="button" class="font-item" data-font="batang" style="font-family: 'Batang', '바탕', serif;">바탕</button>

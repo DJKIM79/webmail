@@ -1936,6 +1936,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (format === 'italic') editor.format('italic', !currentFormats.italic);
                 else if (format === 'underline') editor.format('underline', !currentFormats.underline);
                 else if (format === 'strike') editor.format('strike', !currentFormats.strike);
+                
+                updateToolbarState();
             });
         });
 
@@ -1951,6 +1953,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 const indicator = toolbar.querySelector('#indicator-text-color');
                 if (indicator) indicator.style.backgroundColor = color;
+                
+                updateToolbarState();
             });
         });
 
@@ -1968,6 +1972,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (indicator) {
                     indicator.style.backgroundColor = bg === 'transparent' ? 'transparent' : bg;
                 }
+                
+                updateToolbarState();
             });
         });
 
@@ -1977,6 +1983,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', () => {
                 const alignVal = btn.getAttribute('data-align');
                 editor.format('align', alignVal || false);
+                updateToolbarState();
             });
         });
 
@@ -1987,6 +1994,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const listVal = btn.getAttribute('data-list');
                 const currentFormats = editor.getFormat();
                 editor.format('list', currentFormats.list === listVal ? false : listVal);
+                updateToolbarState();
             });
         });
 
@@ -2098,6 +2106,7 @@ document.addEventListener('DOMContentLoaded', () => {
             quoteBtn.addEventListener('click', () => {
                 const currentFormats = editor.getFormat();
                 editor.format('blockquote', !currentFormats.blockquote);
+                updateToolbarState();
             });
         }
 
@@ -2108,6 +2117,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const currentFormats = editor.getFormat();
                 const hasCode = currentFormats['code-block'];
                 editor.format('code-block', !hasCode);
+                updateToolbarState();
             });
         }
 
@@ -2170,7 +2180,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     activeFontItem.classList.add('active');
                     fontLabel.textContent = activeFontItem.textContent;
                 } else {
-                    fontLabel.textContent = '기본 폰트';
+                    fontLabel.textContent = '맑은 고딕';
                 }
             }
 
@@ -2257,7 +2267,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!quillEditor) {
             const Font = Quill.import('formats/font');
-            Font.whitelist = ['', 'malgungothic', 'dotum', 'gulim', 'batang', 'gungsuh'];
+            Font.whitelist = ['', 'dotum', 'gulim', 'batang', 'gungsuh'];
             Quill.register(Font, true);
 
             // Register numeric point sizes for Quill
