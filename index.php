@@ -174,6 +174,7 @@
     <div id="auth-modal" class="auth-overlay hidden">
         <div class="auth-card">
             <div class="auth-header">
+                <img src="onto.png" alt="OnTo Logo" class="auth-logo">
                 <h2>OnTo Webmail</h2>
             </div>
             <div class="auth-tabs">
@@ -184,7 +185,7 @@
             <!-- Login Form -->
             <form id="form-login" class="auth-form">
                 <div class="form-group">
-                    <label for="login-username">아이디 (Domain: @onto.kr)</label>
+                    <label for="login-username">아이디</label>
                     <div class="input-icon">
                         <i class="fa-solid fa-user"></i>
                         <input type="text" id="login-username" name="username" placeholder="아이디만 입력" required autocomplete="username" inputmode="url" autocorrect="off" autocapitalize="none">

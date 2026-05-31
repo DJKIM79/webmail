@@ -525,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --------------------------------------------------
     async function initApp() {
         // Load and apply theme
-        let savedTheme = localStorage.getItem('mail-theme') || 'violet';
+        let savedTheme = localStorage.getItem('mail-theme') || 'gray';
         applyTheme(savedTheme);
 
         formLoadTimeInput.value = Math.floor(Date.now() / 1000).toString();
@@ -659,7 +659,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     formLogin.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const username = formLogin.username.value;
+        let username = formLogin.username.value.trim();
+        if (username.toLowerCase().endsWith('@onto.kr')) {
+            username = username.slice(0, -8);
+        }
         const password = formLogin.password.value;
         const keep = document.getElementById('login-keep')?.checked ? 1 : 0;
         
@@ -678,7 +681,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     formRegister.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const username = formRegister.username.value;
+        let username = formRegister.username.value.trim();
+        if (username.toLowerCase().endsWith('@onto.kr')) {
+            username = username.slice(0, -8);
+        }
         const name = formRegister.name.value;
         const password = formRegister.password.value;
         const captcha = formRegister.captcha.value;
@@ -2612,7 +2618,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // Select active theme in settings modal
-                const currentTheme = localStorage.getItem('mail-theme') || 'violet';
+                const currentTheme = localStorage.getItem('mail-theme') || 'gray';
                 settingsModal.querySelectorAll('.theme-btn').forEach(btn => {
                     if (btn.dataset.theme === currentTheme) {
                         btn.classList.add('active');

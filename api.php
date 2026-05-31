@@ -55,7 +55,7 @@ try {
 
 // Alter table to add theme column if not exists
 try {
-    $db->exec("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'violet'");
+    $db->exec("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'gray'");
 } catch (PDOException $e) {
     // Ignore error if column already exists
 }
@@ -607,7 +607,7 @@ switch ($action) {
                     'name' => $_SESSION['name'],
                     'role' => $_SESSION['role'],
                     'profile_pic' => $user['profile_pic'] ?? null,
-                    'theme' => $user['theme'] ?? 'violet'
+                    'theme' => $user['theme'] ?? 'gray'
                 ]
             ]);
         } else {
@@ -617,6 +617,9 @@ switch ($action) {
 
     case 'login':
         $username = trim($_POST['username'] ?? '');
+        if (preg_match('/@onto\.kr$/i', $username)) {
+            $username = substr($username, 0, -8);
+        }
         $password = $_POST['password'] ?? '';
         $keep = !empty($_POST['keep']);
         
@@ -671,7 +674,7 @@ switch ($action) {
                 'name' => $user['name'],
                 'role' => $user['role'],
                 'profile_pic' => $user['profile_pic'] ?? null,
-                'theme' => $user['theme'] ?? 'violet'
+                'theme' => $user['theme'] ?? 'gray'
             ]
         ]);
         break;
@@ -692,6 +695,9 @@ switch ($action) {
 
     case 'register':
         $username = trim($_POST['username'] ?? '');
+        if (preg_match('/@onto\.kr$/i', $username)) {
+            $username = substr($username, 0, -8);
+        }
         $name = trim($_POST['name'] ?? '');
         $password = $_POST['password'] ?? '';
         $captcha = trim($_POST['captcha'] ?? '');
@@ -1733,7 +1739,7 @@ switch ($action) {
     case 'update_theme':
         check_auth();
         $username = $_SESSION['username'];
-        $theme = trim($_POST['theme'] ?? 'violet');
+        $theme = trim($_POST['theme'] ?? 'gray');
         
         $stmt = $db->prepare("UPDATE users SET theme = :theme WHERE username = :username");
         $stmt->execute([':theme' => $theme, ':username' => $username]);
