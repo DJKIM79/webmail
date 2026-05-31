@@ -98,6 +98,34 @@ $db->exec("CREATE TABLE IF NOT EXISTS folder_colors (
     UNIQUE(username, folder_name)
 )");
 
+// Create table external_mail_accounts
+$db->exec("CREATE TABLE IF NOT EXISTS external_mail_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL,
+    service_type TEXT NOT NULL,
+    imap_host TEXT,
+    imap_port INTEGER,
+    imap_ssl TEXT,
+    smtp_host TEXT,
+    smtp_port INTEGER,
+    smtp_ssl TEXT,
+    mail_username TEXT,
+    mail_password TEXT,
+    color TEXT DEFAULT '#3b82f6',
+    is_active INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    smtp_auth INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)");
+
+// Migrate existing external_mail_accounts for smtp_auth
+try {
+    $db->exec("ALTER TABLE external_mail_accounts ADD COLUMN smtp_auth INTEGER DEFAULT 1");
+} catch (PDOException $e) {
+    // Ignore error if column already exists
+}
+
 // Create table mail_filters
 $db->exec("CREATE TABLE IF NOT EXISTS mail_filters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -274,6 +302,57 @@ function parse_headers(string $header_raw): array {
     return $headers;
 }
 
+/**
+ * Robustly decode a MIME-encoded email header.
+ * Handles:
+ *  - =?UTF-8?B?...?= / =?UTF-8?Q?...?=
+ *  - =?EUC-KR?B?...?= / =?ks_c_5601-1987?...?=
+ *  - Raw UTF-8 text (no encoding wrapper)
+ *  - Broken/mixed strings
+ */
+function robust_decode_header(string $value): string {
+    if (trim($value) === '') return $value;
+
+    // Check if there are any MIME encoded words at all
+    if (strpos($value, '=?') === false) {
+        // No MIME encoding — treat as raw text.
+        // If it's valid UTF-8, return as-is.
+        if (mb_check_encoding($value, 'UTF-8')) {
+            return $value;
+        }
+        // Try EUC-KR -> UTF-8 conversion
+        $converted = @mb_convert_encoding($value, 'UTF-8', 'EUC-KR');
+        return ($converted !== false && mb_check_encoding($converted, 'UTF-8')) ? $converted : $value;
+    }
+
+    // Normalize charset aliases before decoding
+    $value = preg_replace_callback(
+        '/=\?(ks_c_5601[-_]1987|ks_c_5601|euc-kr|euckr)\?([BbQq])\?([^?]*)\?=/i',
+        function($m) {
+            $encoding = strtoupper($m[2]);
+            $data = $m[3];
+            $decoded = ($encoding === 'B') ? base64_decode($data) : quoted_printable_decode(str_replace('_', ' ', $data));
+            $utf8 = @mb_convert_encoding($decoded, 'UTF-8', 'EUC-KR');
+            if ($utf8 !== false && mb_check_encoding($utf8, 'UTF-8')) {
+                return '=?UTF-8?B?' . base64_encode($utf8) . '?=';
+            }
+            return $m[0];
+        },
+        $value
+    );
+
+    // Now use mb_decode_mimeheader for standard MIME words
+    $decoded = mb_decode_mimeheader($value);
+
+    // Final UTF-8 safety check
+    if (!mb_check_encoding($decoded, 'UTF-8')) {
+        $decoded = mb_convert_encoding($decoded, 'UTF-8', 'auto');
+    }
+
+    return $decoded;
+}
+
+
 function parse_multipart(string $body, string $content_type, string &$html_body, string &$text_body, array &$attachments = []): void {
     if (stripos($content_type, 'multipart/') !== false) {
         if (preg_match('/boundary="?([^";]+)"?/i', $content_type, $m)) {
@@ -304,14 +383,14 @@ function parse_multipart(string $body, string $content_type, string &$html_body,
                 if (stripos($disposition, 'attachment') !== false) {
                     $is_attachment = true;
                     if (preg_match('/filename="?([^";\n\r]+)"?/i', $disposition, $fn)) {
-                        $filename = mb_decode_mimeheader(trim($fn[1]));
+                        $filename = robust_decode_header(trim($fn[1]));
                     }
                 }
                 
                 if (preg_match('/name="?([^";\n\r]+)"?/i', $sub_type, $fn)) {
                     $is_attachment = true;
                     if (empty($filename)) {
-                        $filename = mb_decode_mimeheader(trim($fn[1]));
+                        $filename = robust_decode_header(trim($fn[1]));
                     }
                 }
                 
@@ -372,10 +451,10 @@ function parse_email_header_from_content(string $content, string $filename, stri
 
     $headers = parse_headers($header_raw);
 
-    $subject = isset($headers['subject']) ? mb_decode_mimeheader($headers['subject']) : '(제목 없음)';
-    $from = isset($headers['from']) ? mb_decode_mimeheader($headers['from']) : '';
-    $to = isset($headers['to']) ? mb_decode_mimeheader($headers['to']) : '';
-    $cc = isset($headers['cc']) ? mb_decode_mimeheader($headers['cc']) : '';
+    $subject = isset($headers['subject']) ? robust_decode_header($headers['subject']) : '(제목 없음)';
+    $from = isset($headers['from']) ? robust_decode_header($headers['from']) : '';
+    $to = isset($headers['to']) ? robust_decode_header($headers['to']) : '';
+    $cc = isset($headers['cc']) ? robust_decode_header($headers['cc']) : '';
     $date = isset($headers['date']) ? $headers['date'] : '';
     
     $seen = false;
@@ -437,10 +516,10 @@ function parse_email_from_content(string $content, string $filename, string $fol
     
     $headers = parse_headers($header_raw);
     
-    $subject = isset($headers['subject']) ? mb_decode_mimeheader($headers['subject']) : '(제목 없음)';
-    $from = isset($headers['from']) ? mb_decode_mimeheader($headers['from']) : '';
-    $to = isset($headers['to']) ? mb_decode_mimeheader($headers['to']) : '';
-    $cc = isset($headers['cc']) ? mb_decode_mimeheader($headers['cc']) : '';
+    $subject = isset($headers['subject']) ? robust_decode_header($headers['subject']) : '(제목 없음)';
+    $from = isset($headers['from']) ? robust_decode_header($headers['from']) : '';
+    $to = isset($headers['to']) ? robust_decode_header($headers['to']) : '';
+    $cc = isset($headers['cc']) ? robust_decode_header($headers['cc']) : '';
     $date = isset($headers['date']) ? $headers['date'] : '';
     
     $seen = false;
@@ -762,7 +841,124 @@ switch ($action) {
         // Apply mail filtering rules on new emails
         apply_mail_filters($username, $db);
 
-        
+        // 1. Check for Unified Inbox
+        if ($folder === 'unified_inbox') {
+            $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE username = :username AND is_active = 1 ORDER BY sort_order ASC");
+            $stmt->execute([':username' => $username]);
+            $active_accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            $emails = [];
+            foreach ($active_accounts as $account) {
+                if ($account['service_type'] === 'onto') {
+                    // Fetch local INBOX emails
+                    $sub_paths = ['new', 'cur'];
+                    foreach ($sub_paths as $sub_path) {
+                        $files = secure_list_files($username, $sub_path);
+                        foreach ($files as $file) {
+                            $content = secure_read_file($username, $sub_path, $file);
+                            if ($content) {
+                                $header = parse_email_header_from_content($content, $file, 'INBOX');
+                                if ($header) {
+                                    $header['account_color'] = $account['color'];
+                                    $header['account_email'] = $account['email'];
+                                    $header['account_id'] = $account['id'];
+                                    $emails[] = $header;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Mock emails for external accounts in unified inbox
+                    $service_label = ucfirst($account['service_type']);
+                    $emails[] = [
+                        'id' => 'mock_' . $account['id'] . '_1',
+                        'from' => 'support@' . $account['service_type'] . '.com',
+                        'to' => $account['email'],
+                        'subject' => '[' . $service_label . ' 연동 안내] 외부 메일 연결이 정상 작동 중입니다.',
+                        'snippet' => '회원님의 ' . $service_label . ' 계정이 성공적으로 연동되었습니다. 이제 ' . $account['email'] . ' 메일을 OnTo에서 받아보실 수 있습니다.',
+                        'timestamp' => time() - 3600,
+                        'seen' => 1,
+                        'flagged' => 0,
+                        'folder' => 'unified_inbox',
+                        'account_color' => $account['color'],
+                        'account_email' => $account['email'],
+                        'account_id' => $account['id']
+                    ];
+                    $emails[] = [
+                        'id' => 'mock_' . $account['id'] . '_2',
+                        'from' => 'team@onto.kr',
+                        'to' => $account['email'],
+                        'subject' => '외부 메일 계정의 색상 설정 안내',
+                        'snippet' => '통합 받은 편지함에서 이 이메일 옆에 표시되는 점의 색상은 회원님이 설정한 색상(' . $account['color'] . ')입니다.',
+                        'timestamp' => time() - 7200,
+                        'seen' => 0,
+                        'flagged' => 1,
+                        'folder' => 'unified_inbox',
+                        'account_color' => $account['color'],
+                        'account_email' => $account['email'],
+                        'account_id' => $account['id']
+                    ];
+                }
+            }
+            
+            usort($emails, fn($a, $b) => $b['timestamp'] - $a['timestamp']);
+            respond(true, '성공', ['emails' => $emails]);
+            break;
+        }
+
+        // 2. Check for individual external folder
+        if (preg_match('/^ext_(\d+)_(.+)$/', $folder, $matches)) {
+            $account_id = intval($matches[1]);
+            $sub_folder = $matches[2];
+            
+            $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username AND is_active = 1");
+            $stmt->execute([':id' => $account_id, ':username' => $username]);
+            $account = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$account) {
+                respond(false, '계정을 찾을 수 없거나 비활성화되었습니다.');
+            }
+            
+            if ($account['service_type'] === 'onto') {
+                $folder = $sub_folder; // Fallback to local files below
+            } else {
+                $service_label = ucfirst($account['service_type']);
+                $emails = [];
+                if ($sub_folder === 'INBOX') {
+                    $emails[] = [
+                        'id' => 'mock_' . $account['id'] . '_1',
+                        'from' => 'support@' . $account['service_type'] . '.com',
+                        'to' => $account['email'],
+                        'subject' => '[' . $service_label . ' 연동 안내] 외부 메일 연결이 정상 작동 중입니다.',
+                        'snippet' => '회원님의 ' . $service_label . ' 계정이 성공적으로 연동되었습니다. 이제 ' . $account['email'] . ' 메일을 OnTo에서 받아보실 수 있습니다.',
+                        'timestamp' => time() - 3600,
+                        'seen' => 1,
+                        'flagged' => 0,
+                        'folder' => $folder,
+                        'account_color' => $account['color'],
+                        'account_email' => $account['email'],
+                        'account_id' => $account['id']
+                    ];
+                    $emails[] = [
+                        'id' => 'mock_' . $account['id'] . '_2',
+                        'from' => 'team@onto.kr',
+                        'to' => $account['email'],
+                        'subject' => '외부 메일 계정의 색상 설정 안내',
+                        'snippet' => '통합 받은 편지함에서 이 이메일 옆에 표시되는 점의 색상은 회원님이 설정한 색상(' . $account['color'] . ')입니다.',
+                        'timestamp' => time() - 7200,
+                        'seen' => 0,
+                        'flagged' => 1,
+                        'folder' => $folder,
+                        'account_color' => $account['color'],
+                        'account_email' => $account['email'],
+                        'account_id' => $account['id']
+                    ];
+                }
+                respond(true, '성공', ['emails' => $emails]);
+                break;
+            }
+        }
+
+        // Standard folder check
         if (!in_array($folder, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Starred'], true) && !preg_match('/^[a-zA-Z0-9_\-\x{ac00}-\x{d7a3}\x{3130}-\x{318f}]+$/u', $folder)) {
             respond(false, '잘못된 폴더입니다.');
         }
@@ -837,6 +1033,55 @@ switch ($action) {
 
         if (empty($email_id)) {
             respond(false, '이메일 ID가 누락되었습니다.');
+        }
+
+        // Intercept mock emails
+        if (strpos($email_id, 'mock_') === 0) {
+            $parts = explode('_', $email_id);
+            $account_id = intval($parts[1]);
+            $mock_idx = $parts[2];
+            
+            $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username");
+            $stmt->execute([':id' => $account_id, ':username' => $username]);
+            $account = $stmt->fetch(PDO::FETCH_ASSOC);
+            $service_label = $account ? ucfirst($account['service_type']) : '외부 메일';
+            $account_email = $account ? $account['email'] : 'external@mail.com';
+            
+            if ($mock_idx === '1') {
+                $email = [
+                    'id' => $email_id,
+                    'from' => 'support@' . ($account ? $account['service_type'] : 'external') . '.com',
+                    'to' => $account_email,
+                    'cc' => '',
+                    'bcc' => '',
+                    'subject' => '[' . $service_label . ' 연동 안내] 외부 메일 연결이 정상 작동 중입니다.',
+                    'text_body' => '회원님의 ' . $service_label . ' 계정이 성공적으로 연동되었습니다. 이제 ' . $account_email . ' 메일을 OnTo에서 받아보실 수 있습니다.',
+                    'html_body' => '<p>회원님의 <strong>' . $service_label . '</strong> 계정이 성공적으로 연동되었습니다.</p><p>이제 <strong>' . $account_email . '</strong> 메일을 OnTo에서 받아보실 수 있습니다.</p>',
+                    'timestamp' => time() - 3600,
+                    'seen' => 1,
+                    'flagged' => 0,
+                    'folder' => $folder,
+                    'attachments' => []
+                ];
+            } else {
+                $email = [
+                    'id' => $email_id,
+                    'from' => 'team@onto.kr',
+                    'to' => $account_email,
+                    'cc' => '',
+                    'bcc' => '',
+                    'subject' => '외부 메일 계정의 색상 설정 안내',
+                    'text_body' => '통합 받은 편지함에서 이 이메일 옆에 표시되는 점의 색상은 회원님이 설정한 색상(' . ($account ? $account['color'] : '#3b82f6') . ')입니다. 개인 설정 > 외부 메일 설정에서 색상을 변경해보세요.',
+                    'html_body' => '<p>통합 받은 편지함에서 이 이메일 옆에 표시되는 점의 색상은 회원님이 설정한 색상(<strong>' . ($account ? $account['color'] : '#3b82f6') . '</strong>)입니다.</p><p>개인 설정 &gt; 외부 메일 설정에서 색상을 변경해보세요.</p>',
+                    'timestamp' => time() - 7200,
+                    'seen' => 0,
+                    'flagged' => 1,
+                    'folder' => $folder,
+                    'attachments' => []
+                ];
+            }
+            respond(true, '성공', ['email' => $email]);
+            break;
         }
 
         $path_info = find_email_path($username, $folder, $email_id);
@@ -1614,6 +1859,205 @@ switch ($action) {
         ]);
         
         respond(true, '폴더 색상이 저장되었습니다.');
+        break;
+
+    case 'list_external_mails':
+        check_auth();
+        $username = $_SESSION['username'];
+        
+        // Ensure OnTo row exists
+        $stmt = $db->prepare("SELECT COUNT(*) FROM external_mail_accounts WHERE username = :username AND service_type = 'onto'");
+        $stmt->execute([':username' => $username]);
+        if ($stmt->fetchColumn() == 0) {
+            $stmt = $db->prepare("INSERT INTO external_mail_accounts (username, email, service_type, imap_host, imap_port, imap_ssl, smtp_host, smtp_port, smtp_ssl, mail_username, mail_password, color, is_active, sort_order) VALUES (:username, :email, 'onto', 'mail.onto.kr', 993, 'ssl', 'mail.onto.kr', 465, 'ssl', :mail_username, '', '#3b82f6', 1, -1)");
+            $stmt->execute([
+                ':username' => $username,
+                ':email' => $username . '@onto.kr',
+                ':mail_username' => $username . '@onto.kr'
+            ]);
+        }
+        
+        $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE username = :username ORDER BY sort_order ASC, id ASC");
+        $stmt->execute([':username' => $username]);
+        $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        respond(true, '성공', ['accounts' => $accounts]);
+        break;
+
+    case 'save_external_mail':
+        check_auth();
+        $username = $_SESSION['username'];
+        $id = $_POST['id'] ?? '';
+        $email = trim($_POST['email'] ?? '');
+        $service_type = $_POST['service_type'] ?? 'custom';
+        $imap_host = trim($_POST['imap_host'] ?? '');
+        $imap_port = intval($_POST['imap_port'] ?? 993);
+        $imap_ssl = $_POST['imap_ssl'] ?? 'ssl';
+        $smtp_host = trim($_POST['smtp_host'] ?? '');
+        $smtp_port = intval($_POST['smtp_port'] ?? 465);
+        $smtp_ssl = $_POST['smtp_ssl'] ?? 'ssl';
+        $mail_username = trim($_POST['mail_username'] ?? '');
+        $mail_password = $_POST['mail_password'] ?? '';
+        $color = $_POST['color'] ?? '#3b82f6';
+        $is_active = intval($_POST['is_active'] ?? 1);
+        $smtp_auth = intval($_POST['smtp_auth'] ?? 1);
+
+        if (empty($email) || empty($mail_username)) {
+            respond(false, '이메일 주소와 로그인 계정을 입력해주세요.');
+        }
+
+        if ($id !== '') {
+            $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username");
+            $stmt->execute([':id' => $id, ':username' => $username]);
+            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$existing) {
+                respond(false, '해당 계정을 찾을 수 없습니다.');
+            }
+            if ($existing['service_type'] === 'onto') {
+                $stmt = $db->prepare("UPDATE external_mail_accounts SET is_active = :is_active, color = :color WHERE id = :id");
+                $stmt->execute([
+                    ':is_active' => $is_active,
+                    ':color' => $color,
+                    ':id' => $id
+                ]);
+                respond(true, 'OnTo 메일 설정이 업데이트되었습니다.');
+                break;
+            }
+        }
+
+        if ($id === '' && empty($mail_password)) {
+            respond(false, '암호를 입력해주세요.');
+        }
+
+        if ($id === '') {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM external_mail_accounts WHERE username = :username AND email = :email");
+            $stmt->execute([':username' => $username, ':email' => $email]);
+            if ($stmt->fetchColumn() > 0) {
+                respond(false, '이미 등록된 이메일 주소입니다.');
+            }
+
+            $stmt = $db->prepare("SELECT MAX(sort_order) FROM external_mail_accounts WHERE username = :username");
+            $stmt->execute([':username' => $username]);
+            $max_order = $stmt->fetchColumn();
+            $next_order = $max_order !== null ? intval($max_order) + 1 : 0;
+
+            $stmt = $db->prepare("INSERT INTO external_mail_accounts 
+                (username, email, service_type, imap_host, imap_port, imap_ssl, smtp_host, smtp_port, smtp_ssl, mail_username, mail_password, color, is_active, sort_order, smtp_auth) 
+                VALUES (:username, :email, :service_type, :imap_host, :imap_port, :imap_ssl, :smtp_host, :smtp_port, :smtp_ssl, :mail_username, :mail_password, :color, :is_active, :sort_order, :smtp_auth)");
+            $stmt->execute([
+                ':username' => $username,
+                ':email' => $email,
+                ':service_type' => $service_type,
+                ':imap_host' => $imap_host,
+                ':imap_port' => $imap_port,
+                ':imap_ssl' => $imap_ssl,
+                ':smtp_host' => $smtp_host,
+                ':smtp_port' => $smtp_port,
+                ':smtp_ssl' => $smtp_ssl,
+                ':mail_username' => $mail_username,
+                ':mail_password' => $mail_password,
+                ':color' => $color,
+                ':is_active' => $is_active,
+                ':sort_order' => $next_order,
+                ':smtp_auth' => $smtp_auth
+            ]);
+            respond(true, '외부 메일 계정이 추가되었습니다.');
+        } else {
+            if ($mail_password !== '') {
+                $stmt = $db->prepare("UPDATE external_mail_accounts SET 
+                    email = :email, service_type = :service_type, imap_host = :imap_host, imap_port = :imap_port, imap_ssl = :imap_ssl,
+                    smtp_host = :smtp_host, smtp_port = :smtp_port, smtp_ssl = :smtp_ssl, mail_username = :mail_username, mail_password = :mail_password,
+                    color = :color, is_active = :is_active, smtp_auth = :smtp_auth WHERE id = :id AND username = :username");
+                $stmt->execute([
+                    ':email' => $email,
+                    ':service_type' => $service_type,
+                    ':imap_host' => $imap_host,
+                    ':imap_port' => $imap_port,
+                    ':imap_ssl' => $imap_ssl,
+                    ':smtp_host' => $smtp_host,
+                    ':smtp_port' => $smtp_port,
+                    ':smtp_ssl' => $smtp_ssl,
+                    ':mail_username' => $mail_username,
+                    ':mail_password' => $mail_password,
+                    ':color' => $color,
+                    ':is_active' => $is_active,
+                    ':smtp_auth' => $smtp_auth,
+                    ':id' => $id,
+                    ':username' => $username
+                ]);
+            } else {
+                $stmt = $db->prepare("UPDATE external_mail_accounts SET 
+                    email = :email, service_type = :service_type, imap_host = :imap_host, imap_port = :imap_port, imap_ssl = :imap_ssl,
+                    smtp_host = :smtp_host, smtp_port = :smtp_port, smtp_ssl = :smtp_ssl, mail_username = :mail_username,
+                    color = :color, is_active = :is_active, smtp_auth = :smtp_auth WHERE id = :id AND username = :username");
+                $stmt->execute([
+                    ':email' => $email,
+                    ':service_type' => $service_type,
+                    ':imap_host' => $imap_host,
+                    ':imap_port' => $imap_port,
+                    ':imap_ssl' => $imap_ssl,
+                    ':smtp_host' => $smtp_host,
+                    ':smtp_port' => $smtp_port,
+                    ':smtp_ssl' => $smtp_ssl,
+                    ':mail_username' => $mail_username,
+                    ':color' => $color,
+                    ':is_active' => $is_active,
+                    ':smtp_auth' => $smtp_auth,
+                    ':id' => $id,
+                    ':username' => $username
+                ]);
+            }
+            respond(true, '외부 메일 계정 설정이 변경되었습니다.');
+        }
+        break;
+
+    case 'delete_external_mail':
+        check_auth();
+        $username = $_SESSION['username'];
+        $id = $_POST['id'] ?? '';
+        if ($id === '') {
+            respond(false, '계정 ID가 누락되었습니다.');
+        }
+
+        $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username");
+        $stmt->execute([':id' => $id, ':username' => $username]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$existing) {
+            respond(false, '해당 계정을 찾을 수 없습니다.');
+        }
+        if ($existing['service_type'] === 'onto') {
+            respond(false, 'OnTo 기본 계정은 삭제할 수 없습니다.');
+        }
+
+        $stmt = $db->prepare("DELETE FROM external_mail_accounts WHERE id = :id AND username = :username");
+        $stmt->execute([':id' => $id, ':username' => $username]);
+        respond(true, '외부 메일 계정이 삭제되었습니다.');
+        break;
+
+    case 'update_external_mail_order':
+        check_auth();
+        $username = $_SESSION['username'];
+        $order = json_decode($_POST['order'] ?? '[]', true);
+        if (empty($order)) {
+            respond(false, '순서 정보가 없습니다.');
+        }
+        
+        try {
+            $db->beginTransaction();
+            foreach ($order as $idx => $id) {
+                $stmt = $db->prepare("UPDATE external_mail_accounts SET sort_order = :idx WHERE id = :id AND username = :username");
+                $stmt->execute([
+                    ':idx' => $idx,
+                    ':id' => $id,
+                    ':username' => $username
+                ]);
+            }
+            $db->commit();
+            respond(true, '계정 순서가 저장되었습니다.');
+        } catch (Exception $e) {
+            $db->rollBack();
+            respond(false, '순서 저장 실패: ' . $e->getMessage());
+        }
         break;
 
     case 'create_tag':

@@ -628,20 +628,54 @@
         </div>
     </div>
 
+    <!-- EXTERNAL MAIL SETTINGS MODAL -->
+    <div id="external-mail-modal" class="tags-overlay hidden">
+        <div class="tags-card external-mail-card" style="width: 600px; max-height: 85vh; height: 580px;">
+            <div class="tags-header" style="flex-shrink: 0;">
+                <h3><i class="fa-solid fa-at"></i> 외부 메일 설정</h3>
+            </div>
+            <div class="external-mail-body" style="display: flex; height: calc(100% - 53px); overflow: hidden;">
+                <!-- 왼쪽 계정 목록 -->
+                <div class="external-mail-list-pane" style="width: 200px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; background: rgba(255, 255, 255, 0.02); flex-shrink: 0;">
+                    <div class="pane-action-bar" style="padding: 16px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+                        <span style="font-weight: bold; font-size: 13px; color: var(--text-primary);">계정 목록</span>
+                        <button type="button" id="btn-add-external-mail" class="btn-submit" style="padding: 0; font-size: 11px; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; min-width: 24px; flex-shrink: 0;" title="계정 추가">
+                            <i class="fa-solid fa-plus"></i>
+                        </button>
+                    </div>
+                    <div class="external-mail-accounts-list" id="external-mail-accounts-list" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: scroll; scrollbar-gutter: stable; flex-grow: 1;">
+                        <!-- Dynamic list of external mail accounts -->
+                    </div>
+                </div>
+                
+                <!-- 오른쪽 상세 설정 -->
+                <div class="external-mail-detail-pane" id="external-mail-detail-pane" style="flex-grow: 1; display: flex; flex-direction: column; background: rgba(0, 0, 0, 0.05); overflow-y: scroll; scrollbar-gutter: stable; padding: 20px;">
+                    <div class="detail-placeholder" style="margin: auto; text-align: center; color: var(--text-muted); opacity: 0.6;">
+                        <i class="fa-solid fa-envelope-open-text" style="font-size: 48px; margin-bottom: 12px; display: block;"></i>
+                        <span>메일 계정을 선택하거나 새 계정을 추가하세요.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- SETTINGS MODAL -->
     <div id="settings-modal" class="settings-overlay hidden">
         <div class="settings-card">
             <div class="settings-header">
                 <h3><i class="fa-solid fa-gear"></i> 개인 설정</h3>
                 <div class="settings-header-actions">
-                    <button type="button" id="btn-admin" class="btn-icon-settings hidden" title="회원 관리">
-                        <i class="fa-solid fa-user-gear"></i>
+                    <button type="button" id="btn-manage-tags" class="btn-icon-settings" title="폴더 관리">
+                        <i class="fa-solid fa-folder-tree"></i>
                     </button>
                     <button type="button" id="btn-manage-filters" class="btn-icon-settings" title="메일 필터링">
                         <i class="fa-solid fa-filter"></i>
                     </button>
-                    <button type="button" id="btn-manage-tags" class="btn-icon-settings" title="폴더 관리">
-                        <i class="fa-solid fa-folder-tree"></i>
+                    <button type="button" id="btn-manage-external-mail" class="btn-icon-settings" title="외부 메일 설정">
+                        <i class="fa-solid fa-at"></i>
+                    </button>
+                    <button type="button" id="btn-admin" class="btn-icon-settings hidden" title="회원 관리">
+                        <i class="fa-solid fa-user-gear"></i>
                     </button>
                     <button type="button" id="btn-logout" class="btn-icon-settings btn-logout-settings" title="로그아웃">
                         <span class="logout-icon-wrapper">

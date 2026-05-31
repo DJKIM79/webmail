@@ -11,7 +11,11 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedEmailId: null,
         unreadCount: 0,
         folderCache: {}, // Cache for flicker-free folder switching
-        tagColors: {} // Custom colors for personal folders
+        tagColors: {}, // Custom colors for personal folders
+        externalMails: [],
+        sidebarCollapsedGroups: JSON.parse(localStorage.getItem('mail-sidebar-collapsed-groups') || '{}'),
+        personalFolderExpanded: localStorage.getItem('mail-personal-folder-expanded') === 'true',
+        showFlaggedOnly: false
     };
 
     function getBaseId(id) {
@@ -185,6 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupClickOutside(document.getElementById('admin-create-user-modal'));
     setupClickOutside(document.getElementById('locked-modal'));
     setupClickOutside(document.getElementById('group-rename-modal'));
+    setupClickOutside(document.getElementById('external-mail-modal'));
 
     // Global ESC Key Listener to close modals/popovers one by one (Sequential)
     document.addEventListener('keydown', (e) => {
@@ -215,6 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'groups-modal',                           // z-index 210
                 'filters-modal',                          // z-index 200
                 'tags-modal',                             // z-index 200
+                'external-mail-modal',                    // z-index 200
                 'admin-create-user-modal',                 // z-index 140
                 'admin-modal',                            // z-index 130
                 'settings-modal',                         // z-index 120
@@ -236,18 +242,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const folder = state.currentFolder;
         const isBuiltIn = ['INBOX', 'Starred', 'Sent', 'Drafts', 'Trash'].includes(folder);
         
-        // If it's a personal folder (tag), ensure tags container is expanded and arrow is rotated
-        if (!isBuiltIn) {
+        if (!isBuiltIn && !folder.startsWith('ext_') && folder !== 'unified_inbox') {
             const sidebarTagsWrapper = document.getElementById('sidebar-tags-wrapper');
             const tagsMenuArrow = document.getElementById('tags-menu-arrow');
             if (sidebarTagsWrapper) sidebarTagsWrapper.classList.add('expanded');
             if (tagsMenuArrow) tagsMenuArrow.classList.add('rotated');
         }
         
-        // 1. Update built-in nav items and btn-toggle-tags
-        navItems.forEach(el => {
+        document.querySelectorAll('.sidebar-nav .nav-item').forEach(el => {
             if (el.id === 'btn-toggle-tags') {
-                if (!isBuiltIn) {
+                if (!isBuiltIn && !folder.startsWith('ext_') && folder !== 'unified_inbox') {
                     el.classList.add('active');
                 } else {
                     el.classList.remove('active');
@@ -261,7 +265,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        // 2. Update tag items in sidebar
         document.querySelectorAll('.tag-item').forEach(el => {
             if (el.dataset.folder === folder) {
                 el.classList.add('active');
@@ -270,7 +273,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        // 3. Update popover tag items if loaded
         document.querySelectorAll('.tags-popover-item').forEach(el => {
             if (el.dataset.folder === folder) {
                 el.classList.add('active');
@@ -602,9 +604,14 @@ document.addEventListener('DOMContentLoaded', () => {
             mailListPane.style.height = `${listHeight}px`;
         }
         
-        loadEmails(state.currentFolder);
-        loadTags();
-        updateGlobalUnreadCount();
+        loadExternalMailsAndRenderSidebar(state.currentFolder).then(() => {
+            // 외부 계정 2개 이상이면 unified_inbox, 아니면 INBOX 자동 선택
+            const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
+            state.currentFolder = activeAccs.length > 1 ? 'unified_inbox' : 'INBOX';
+            syncActiveFolderUI();
+            updateGlobalUnreadCount();
+            loadEmails(state.currentFolder);
+        });
         
         // Start polling (every 30 seconds)
         if (window.mailPoller) clearInterval(window.mailPoller);
@@ -764,7 +771,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const shouldFade = showLoading && !isSameFolder && !state.folderCache[folder];
 
         if (shouldFade) {
-            mailContainer.classList.add('loading');
+            const tbody = mailContainer.querySelector('#mail-list-tbody');
+            if (hasExistingList && tbody) {
+                tbody.classList.add('loading-fade');
+            } else {
+                mailContainer.classList.add('loading');
+            }
             await new Promise(resolve => setTimeout(resolve, 150));
         }
 
@@ -813,6 +825,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             tr.className = `mail-item ${isSeen ? '' : 'unread'} ${isSelected ? 'selected' : ''}`;
                             tr.dataset.id = email.id;
+                            tr.style.setProperty('--account-color', getEmailAccountColor(email));
 
                             const dateStr = formatDate(email.timestamp);
                             const cleanFrom = escapeHtml(email.from);
@@ -827,7 +840,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </td>
                                 <td class="col-sender">${cleanFrom}</td>
                                 <td class="col-subject">
-                                    ${isSeen ? '<i class="fa-regular fa-envelope-open" style="margin-right:8px; opacity:0.5; font-size: 13px;"></i>' : '<i class="fa-solid fa-envelope" style="margin-right:8px; color: var(--color-primary); font-size: 13px;"></i>'}
+                                    <i class="mail-status-icon ${isSeen ? 'fa-regular fa-envelope-open' : 'fa-solid fa-envelope'} ${isSeen ? 'mail-icon-read' : 'mail-icon-unread'}" style="margin-right:8px; font-size: 13px;"></i>
                                     ${escapeHtml(email.subject)}
                                 </td>
                                 <td class="col-snippet">${escapeHtml(email.snippet || '')}</td>
@@ -919,13 +932,34 @@ document.addEventListener('DOMContentLoaded', () => {
                 mailContainer.offsetHeight;
                 mailContainer.classList.remove('loading');
             }
+            if (tbody && tbody.classList.contains('loading-fade')) {
+                tbody.classList.remove('loading-fade');
+            }
         } else {
             showToast(res.message);
             mailContainer.classList.remove('loading');
+            const tbody = mailContainer.querySelector('#mail-list-tbody');
+            if (tbody && tbody.classList.contains('loading-fade')) {
+                tbody.classList.remove('loading-fade');
+            }
         }
     }
 
     function getFolderIcon(folder) {
+        if (folder === 'unified_inbox') {
+            return '<i class="fa-solid fa-envelopes-bulk" style="color: var(--color-primary);"></i>';
+        }
+        if (folder.startsWith('ext_')) {
+            const parts = folder.split('_');
+            const sub = parts[parts.length - 1];
+            switch (sub) {
+                case 'INBOX': return '<i class="fa-solid fa-inbox"></i>';
+                case 'Sent': return '<i class="fa-solid fa-paper-plane"></i>';
+                case 'Drafts': return '<i class="fa-solid fa-file-signature"></i>';
+                case 'Trash': return '<i class="fa-solid fa-trash-can"></i>';
+                default: return '<i class="fa-solid fa-folder-open"></i>';
+            }
+        }
         switch (folder) {
             case 'INBOX': return '<i class="fa-solid fa-inbox"></i>';
             case 'Starred': return '<i class="fa-solid fa-star" style="color: var(--color-warning);"></i>';
@@ -937,6 +971,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getFolderDisplayName(folder) {
+        if (folder === 'unified_inbox') {
+            return '전체 받은 편지함';
+        }
+        if (folder.startsWith('ext_')) {
+            const parts = folder.split('_');
+            const accId = parseInt(parts[1]);
+            const sub = parts[2];
+            const acc = (state.externalMails || []).find(a => a.id === accId);
+            const emailLabel = acc ? acc.email : '외부 계정';
+            let subLabel = sub;
+            switch (sub) {
+                case 'INBOX': subLabel = '받은 편지함'; break;
+                case 'Sent': subLabel = '보낸 편지함'; break;
+                case 'Drafts': subLabel = '임시 보관함'; break;
+                case 'Trash': subLabel = '휴지통'; break;
+            }
+            return `${subLabel} (${emailLabel})`;
+        }
         switch (folder) {
             case 'INBOX': return '받은 편지함';
             case 'Starred': return '즐겨찾기';
@@ -954,19 +1006,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const f = email.from.toLowerCase();
             const t = (email.to || "").toLowerCase();
             const c = (email.cc || "").toLowerCase();
-            return s.includes(query) || f.includes(query) || t.includes(query) || c.includes(query);
+            const matchesQuery = s.includes(query) || f.includes(query) || t.includes(query) || c.includes(query);
+            const matchesFlagged = !state.showFlaggedOnly || email.flagged;
+            return matchesQuery && matchesFlagged;
         });
 
         const mainContent = document.getElementById('main-content');
         if (filtered.length === 0) {
-            mailContainer.innerHTML = '<div class="list-empty"><i class="fa-regular fa-envelope"></i><p>이메일이 없습니다.</p></div>';
             if (readerContent) readerContent.classList.add('hidden');
             if (readerEmpty) readerEmpty.classList.remove('hidden');
             state.selectedEmailId = null;
-            if (mainContent) {
+            if (state.emails.length === 0 && mainContent) {
                 mainContent.classList.add('empty-mailbox');
             }
-            return;
         } else {
             if (mainContent) {
                 mainContent.classList.remove('empty-mailbox');
@@ -980,25 +1032,60 @@ document.addEventListener('DOMContentLoaded', () => {
             date: getCookie('colWidth_date') || '100'
         };
 
-        const table = document.createElement('table');
-        table.className = 'mail-list-table';
-        
-        table.innerHTML = `
-            <thead>
-                <tr>
-                    <th class="col-chk"><input type="checkbox" id="chk-all-emails"></th>
-                    <th class="col-flag"></th>
-                    <th class="col-sender" style="width: ${colWidths.sender}px;">보낸사람</th>
-                    <th class="col-subject" style="width: ${colWidths.subject}px;">제목</th>
-                    <th class="col-snippet" style="width: ${colWidths.snippet}px;">내용</th>
-                    <th class="col-date" style="width: ${colWidths.date}px;">시간</th>
-                    <th class="col-filler" style="width: auto;"></th>
-                </tr>
-            </thead>
-            <tbody id="mail-list-tbody"></tbody>
-        `;
-        
-        const tbody = table.querySelector('#mail-list-tbody');
+        let table = mailContainer.querySelector('.mail-list-table');
+        let tbody;
+        let isNewTable = false;
+
+        if (!table) {
+            isNewTable = true;
+            table = document.createElement('table');
+            table.className = 'mail-list-table';
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th class="col-chk"><input type="checkbox" id="chk-all-emails"></th>
+                        <th class="col-starred-filter">
+                            <button type="button" id="btn-flagged-filter" class="flagged-filter-btn" title="즐겨찾기만 보기">
+                                <i class="fa-regular fa-star"></i>
+                            </button>
+                        </th>
+                        <th class="col-sender" style="width: ${colWidths.sender}px;">보낸사람</th>
+                        <th class="col-subject" style="width: ${colWidths.subject}px;">제목</th>
+                        <th class="col-snippet" style="width: ${colWidths.snippet}px;">내용</th>
+                        <th class="col-date" style="width: ${colWidths.date}px;">시간</th>
+                        <th class="col-filler" style="width: auto;"></th>
+                    </tr>
+                </thead>
+                <tbody id="mail-list-tbody"></tbody>
+            `;
+            tbody = table.querySelector('#mail-list-tbody');
+        } else {
+            tbody = table.querySelector('#mail-list-tbody');
+            tbody.innerHTML = '';
+            
+            // Clean up any existing empty overlay
+            const existingOverlay = mailContainer.querySelector('.mail-list-empty-overlay');
+            if (existingOverlay) {
+                existingOverlay.remove();
+            }
+        }
+
+        // Update flagged filter button state in existing or new header
+        const flaggedFilterBtn = table.querySelector('#btn-flagged-filter');
+        if (flaggedFilterBtn) {
+            flaggedFilterBtn.className = `flagged-filter-btn ${state.showFlaggedOnly ? 'active' : ''}`;
+            flaggedFilterBtn.title = state.showFlaggedOnly ? '모든 메일 보기' : '즐겨찾기만 보기';
+            const starIcon = flaggedFilterBtn.querySelector('i');
+            if (starIcon) {
+                starIcon.className = `${state.showFlaggedOnly ? 'fa-solid' : 'fa-regular'} fa-star`;
+            }
+        }
+
+        // Reset check-all checkbox
+        const chkAll = table.querySelector('#chk-all-emails');
+        if (chkAll) {
+            chkAll.checked = false;
+        }
         
         filtered.forEach((email, index) => {
             const tr = document.createElement('tr');
@@ -1006,6 +1093,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isSeen = email.seen || isSelected;
             tr.className = `mail-item ${isSeen ? '' : 'unread'} ${isSelected ? 'selected' : ''}`;
             tr.dataset.id = email.id;
+            tr.style.setProperty('--account-color', getEmailAccountColor(email));
 
             const dateStr = formatDate(email.timestamp);
             const cleanFrom = escapeHtml(email.from);
@@ -1020,7 +1108,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td class="col-sender">${cleanFrom}</td>
                 <td class="col-subject">
-                    ${isSeen ? '<i class="fa-regular fa-envelope-open" style="margin-right:8px; opacity:0.5; font-size: 13px;"></i>' : '<i class="fa-solid fa-envelope" style="margin-right:8px; color: var(--color-primary); font-size: 13px;"></i>'}
+                    <i class="mail-status-icon ${isSeen ? 'fa-regular fa-envelope-open' : 'fa-solid fa-envelope'} ${isSeen ? 'mail-icon-read' : 'mail-icon-unread'}" style="margin-right:8px; font-size: 13px;"></i>
+                    ${(state.currentFolder === 'unified_inbox' && email.account_color) ? `<span class="unified-mail-badge" style="background-color: ${email.account_color};" title="${escapeHtml(email.account_email)}"></span>` : ''}
                     ${escapeHtml(email.subject)}
                 </td>
                 <td class="col-snippet">${escapeHtml(email.snippet || '')}</td>
@@ -1077,22 +1166,53 @@ document.addEventListener('DOMContentLoaded', () => {
             tbody.appendChild(tr);
         });
 
-        mailContainer.innerHTML = '';
-        mailContainer.appendChild(table);
-        makeTableColumnsResizable(table);
+        if (isNewTable) {
+            mailContainer.innerHTML = '';
+            mailContainer.appendChild(table);
 
-        const chkAll = table.querySelector('#chk-all-emails');
-        if (chkAll) {
-            chkAll.addEventListener('change', (e) => {
-                const checked = e.target.checked;
-                table.querySelectorAll('.mail-item-chk').forEach(chk => {
-                    chk.checked = checked;
-                    const row = chk.closest('tr');
-                    if (row) {
-                        row.classList.toggle('checked', checked);
-                    }
+            makeTableColumnsResizable(table);
+
+            const chkAllElement = table.querySelector('#chk-all-emails');
+            if (chkAllElement) {
+                chkAllElement.addEventListener('change', (e) => {
+                    const checked = e.target.checked;
+                    table.querySelectorAll('.mail-item-chk').forEach(chk => {
+                        chk.checked = checked;
+                        const row = chk.closest('tr');
+                        if (row) {
+                            row.classList.toggle('checked', checked);
+                        }
+                    });
                 });
-            });
+            }
+
+            const flaggedFilterBtnElement = table.querySelector('#btn-flagged-filter');
+            if (flaggedFilterBtnElement) {
+                flaggedFilterBtnElement.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    state.showFlaggedOnly = !state.showFlaggedOnly;
+                    renderMailList();
+                });
+            }
+        }
+
+        // 결과가 0개인 경우 테이블 하단에 중앙 정렬 빈 메시지 표시
+        if (filtered.length === 0) {
+            const emptyOverlay = document.createElement('div');
+            if (state.showFlaggedOnly) {
+                emptyOverlay.className = 'mail-list-empty-overlay starred-empty';
+                emptyOverlay.innerHTML = `
+                    <i class="fa-regular fa-star"></i>
+                    <span>즐겨찾기한 메일이 없습니다.</span>
+                `;
+            } else {
+                emptyOverlay.className = 'mail-list-empty-overlay';
+                emptyOverlay.innerHTML = `
+                    <i class="fa-solid fa-inbox"></i>
+                    <span>이메일이 없습니다.</span>
+                `;
+            }
+            mailContainer.appendChild(emptyOverlay);
         }
     }
 
@@ -1177,6 +1297,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     sidebarTagsContainer.appendChild(a);
                 });
+
+                // Restore personal folder expanded state from localStorage
+                const sidebarTagsWrapper = document.getElementById('sidebar-tags-wrapper');
+                const tagsMenuArrow = document.getElementById('tags-menu-arrow');
+                if (sidebarTagsWrapper && state.personalFolderExpanded && !sidebar.classList.contains('collapsed')) {
+                    sidebarTagsWrapper.classList.add('expanded');
+                    if (tagsMenuArrow) tagsMenuArrow.classList.add('rotated');
+                }
                 
                 // Keep UI classes synchronized
                 syncActiveFolderUI();
@@ -1203,222 +1331,236 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function selectEmail(id) {
-        state.selectedEmailId = id;
-        const targetBase = getBaseId(id);
-
-        document.querySelectorAll('.mail-item').forEach(el => {
-            if (getBaseId(el.dataset.id) === targetBase) {
-                el.classList.add('selected');
-                el.classList.remove('unread');
-                // Remove unread dot inside subject
-                const dot = el.querySelector('.unread-dot');
-                if (dot) dot.remove();
-            } else {
-                el.classList.remove('selected');
-            }
-        });
-
-        readerEmpty.classList.add('hidden');
-        readerContent.classList.remove('hidden');
-
-        // Populate tag move dropdown
-        const tagMoveDropdownList = document.getElementById('tag-move-dropdown-list');
-        if (tagMoveDropdownList) {
-            tagMoveDropdownList.innerHTML = '<div style="padding: 10px; color: var(--text-secondary); font-size: 12px;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</div>';
-            const resTags = await apiRequest('list_tags');
-            tagMoveDropdownList.innerHTML = '';
-            if (resTags.success) {
-                const allDestinations = ['INBOX', ...(resTags.tags || [])];
-                let addedCount = 0;
-                allDestinations.forEach(dest => {
-                    if (dest === state.currentFolder) return;
-                    
-                    const a = document.createElement('a');
-                    a.href = '#';
-                    const folderColor = getFolderColor(dest);
-                    a.innerHTML = `
-                        <i class="fa-solid fa-folder" style="color: ${folderColor}; margin-right: 8px;"></i>
-                        <span>${dest === 'INBOX' ? '받은 편지함 (INBOX)' : escapeHtml(dest)}</span>
-                    `;
-                    a.addEventListener('click', async (evt) => {
-                        evt.preventDefault();
-                        showToast('메일을 이동 중입니다...');
-                        const rMove = await apiRequest('move_email', 'POST', {
-                            id: id,
-                            folder: state.currentFolder,
-                            dest_folder: dest
-                        });
-                        showToast(rMove.message);
-                        if (rMove.success) {
-                            readerEmpty.classList.remove('hidden');
-                            readerContent.classList.add('hidden');
-                            state.selectedEmailId = null;
-                            loadEmails(state.currentFolder);
-                        }
-                    });
-                    tagMoveDropdownList.appendChild(a);
-                    addedCount++;
-                });
-                if (addedCount === 0) {
-                    tagMoveDropdownList.innerHTML = '<div style="padding: 10px; color: var(--text-secondary); font-size: 12px; text-align: center;">이동할 수 있는 다른 폴더가 없습니다.</div>';
-                }
-            }
-        }
-
-        // Fetch full email (resolve actual folder for virtual folder support)
-        let actualFolder = state.currentFolder;
-        const emailInState = state.emails.find(e => e.id === id);
-        if (emailInState && emailInState.folder) {
-            actualFolder = emailInState.folder;
-        }
-        const res = await apiRequest('read_email', 'GET', { folder: actualFolder, id });
-        if (res.success && res.email) {
-            const email = res.email;
-
-            // If the ID has changed (e.g., marked as seen and renamed), update it in the DOM
-            if (email.id !== id) {
-                const tr = document.querySelector(`.mail-item[data-id="${id}"]`);
-                if (tr) {
-                    tr.dataset.id = email.id;
-                    const chk = tr.querySelector('.mail-item-chk');
-                    if (chk) chk.dataset.id = email.id;
-                    const star = tr.querySelector('.star-btn');
-                    if (star) star.dataset.id = email.id;
-                }
-                if (state.selectedEmailId === id) state.selectedEmailId = email.id;
-                const emailInState = state.emails.find(e => e.id === id);
-                if (emailInState) emailInState.id = email.id;
-            }
-
-            readSubject.innerHTML = `<i class="fa-regular fa-envelope" style="margin-right: 12px; opacity: 0.5; font-size: 0.9em;"></i>${escapeHtml(email.subject)}`;
-            readFrom.textContent = email.from;
-            readTo.textContent = email.to;
-            readDate.textContent = email.date;
-
-            // Render email body inside sandboxed iframe
-            const doc = mailBodyFrame.contentDocument || mailBodyFrame.contentWindow.document;
-            doc.open();
-            
-            // Requirements 3.1: 다크 테마 배경 투명 및 글자색 연동
-            let bodyBg = '#161621'; // Solid dark theme bg
-            let bodyColor = '#f3f4f6';
-            let linkColor = '#c084fc';
-            
-            const isWhiteTheme = document.body.classList.contains('theme-white');
-            if (isWhiteTheme) {
-                bodyBg = '#ffffff';
-                bodyColor = '#333333';
-                linkColor = '#4f46e5';
-            } else if (document.body.classList.contains('theme-gray')) {
-                bodyBg = '#18181b'; // zinc-900
-                bodyColor = '#f4f4f5'; // zinc-100
-                linkColor = '#cbd5e1'; // zinc-300
-            } else if (document.body.classList.contains('theme-black')) {
-                bodyBg = '#000000';
-                bodyColor = '#e2e8f0';
-                linkColor = '#ffffff';
-            }
-            
-            // Generate theme override CSS if dark mode is active
-            const themeOverrideCss = !isWhiteTheme ? `
-                html, body {
-                    background-color: ${bodyBg} !important;
-                    color: ${bodyColor} !important;
-                }
-                div, table, td, tr, p, span, section, article, header, footer, h1, h2, h3, h4, h5, h6, font {
-                    background-color: transparent !important;
-                    color: inherit !important;
-                }
-                a, a * {
-                    color: ${linkColor} !important;
-                }
-            ` : `
-                html, body {
-                    background-color: ${bodyBg};
-                    color: ${bodyColor};
-                }
-            `;
-            
-            const content = `
-                <html>
-                <head>
-                    <style>
-                        body {
-                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                            font-size: 14px;
-                            line-height: 1.6;
-                            padding: 24px;
-                            margin: 0;
-                        }
-                        a { color: ${linkColor}; }
-                        ${themeOverrideCss}
-                    </style>
-                </head>
-                <body>
-                    ${email.body}
-                </body>
-                </html>
-            `;
-            doc.write(content);
-            doc.close();
-
-            // Display attachments if present in the email
-            const readAttachments = document.getElementById('read-attachments');
-            const attachmentsCount = document.getElementById('attachments-count');
-            const readAttachmentsList = document.getElementById('read-attachments-list');
-            
-            if (readAttachments && readAttachmentsList && attachmentsCount) {
-                const attachments = email.attachments || [];
-                if (attachments.length > 0) {
-                    readAttachments.classList.remove('hidden');
-                    attachmentsCount.textContent = attachments.length;
-                    readAttachmentsList.innerHTML = '';
-                    
-                    attachments.forEach(att => {
-                        const a = document.createElement('a');
-                        a.href = `data:${att.content_type};base64,${att.data}`;
-                        a.download = att.filename;
-                        a.className = 'read-attachment-item';
-                        
-                        const sizeKB = (att.size / 1024).toFixed(1);
-                        
-                        a.innerHTML = `
-                            <i class="fa-solid fa-file-arrow-down"></i>
-                            <span>${escapeHtml(att.filename)}</span>
-                            <span style="color: var(--text-muted);">(${sizeKB} KB)</span>
-                        `;
-                        readAttachmentsList.appendChild(a);
-                    });
-                } else {
-                    readAttachments.classList.add('hidden');
-                }
-            }
-
-            // Setup reply / forward actions based on selected mail
-            btnReply.onclick = () => openCompose(email.from, `Re: ${email.subject}`, `\n\n--- Original Message ---\nFrom: ${email.from}\nTo: ${email.to}\nDate: ${email.date}\n\n${email.text_body || ''}`);
-            btnForward.onclick = () => openCompose('', `Fwd: ${email.subject}`, `\n\n--- Original Message ---\nFrom: ${email.from}\nTo: ${email.to}\nDate: ${email.date}\n\n${email.text_body || ''}`);
-            btnDeleteMail.onclick = () => deleteEmail(id);
-
-            // Mark locally as seen, update ID to the server's new ID, and update badge
+        console.log("selectEmail started. id:", id);
+        showToast("메일을 불러오는 중... (ID: " + id.substring(0, 10) + ")");
+        try {
+            state.selectedEmailId = id;
             const targetBase = getBaseId(id);
-            const emailInState = state.emails.find(e => getBaseId(e.id) === targetBase);
-            if (emailInState) {
-                emailInState.seen = true;
-                emailInState.id = res.email.id; // Update to the new ID with flags
+
+            document.querySelectorAll('.mail-item').forEach(el => {
+                if (getBaseId(el.dataset.id) === targetBase) {
+                    el.classList.add('selected');
+                    el.classList.remove('unread');
+                    // Change mail icon to read state
+                    const mailIcon = el.querySelector('.mail-status-icon');
+                    if (mailIcon) {
+                        mailIcon.classList.remove('fa-solid', 'fa-envelope', 'mail-icon-unread');
+                        mailIcon.classList.add('fa-regular', 'fa-envelope-open', 'mail-icon-read');
+                    }
+                } else {
+                    el.classList.remove('selected');
+                }
+            });
+
+            readerEmpty.classList.add('hidden');
+            readerContent.classList.remove('hidden');
+
+            // Populate tag move dropdown
+            const tagMoveDropdownList = document.getElementById('tag-move-dropdown-list');
+            if (tagMoveDropdownList) {
+                tagMoveDropdownList.innerHTML = '<div style="padding: 10px; color: var(--text-secondary); font-size: 12px;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</div>';
+                const resTags = await apiRequest('list_tags');
+                tagMoveDropdownList.innerHTML = '';
+                if (resTags.success) {
+                    const allDestinations = ['INBOX', ...(resTags.tags || [])];
+                    let addedCount = 0;
+                    allDestinations.forEach(dest => {
+                        if (dest === state.currentFolder) return;
+                        
+                        const a = document.createElement('a');
+                        a.href = '#';
+                        const folderColor = getFolderColor(dest);
+                        a.innerHTML = `
+                            <i class="fa-solid fa-folder" style="color: ${folderColor}; margin-right: 8px;"></i>
+                            <span>${dest === 'INBOX' ? '받은 편지함 (INBOX)' : escapeHtml(dest)}</span>
+                        `;
+                        a.addEventListener('click', async (evt) => {
+                            evt.preventDefault();
+                            showToast('메일을 이동 중입니다...');
+                            const rMove = await apiRequest('move_email', 'POST', {
+                                id: id,
+                                folder: state.currentFolder,
+                                dest_folder: dest
+                            });
+                            showToast(rMove.message);
+                            if (rMove.success) {
+                                readerEmpty.classList.remove('hidden');
+                                readerContent.classList.add('hidden');
+                                state.selectedEmailId = null;
+                                loadEmails(state.currentFolder);
+                            }
+                        });
+                        tagMoveDropdownList.appendChild(a);
+                        addedCount++;
+                    });
+                    if (addedCount === 0) {
+                        tagMoveDropdownList.innerHTML = '<div style="padding: 10px; color: var(--text-secondary); font-size: 12px; text-align: center;">이동할 수 있는 다른 폴더가 없습니다.</div>';
+                    }
+                }
             }
-            
-            // Synchronize the DOM element's dataset.id to the new ID
-            const el = document.querySelector(`.mail-item[data-id="${id}"]`);
-            if (el) {
-                el.dataset.id = res.email.id;
+
+            // Fetch full email (resolve actual folder for virtual folder support)
+            let actualFolder = state.currentFolder;
+            const emailInState = state.emails.find(e => e.id === id);
+            if (emailInState && emailInState.folder) {
+                actualFolder = emailInState.folder;
             }
-            
-            // Update selected ID to the new ID
-            state.selectedEmailId = res.email.id;
-            
-            updateGlobalUnreadCount();
-        } else {
-            showToast(res.message);
+            console.log("Requesting read_email. actualFolder:", actualFolder, "id:", id);
+            const res = await apiRequest('read_email', 'GET', { folder: actualFolder, id });
+            console.log("read_email response:", res);
+
+            if (res.success && res.email) {
+                const email = res.email;
+                showToast("메일 데이터 로드 완료. 렌더링 중...");
+
+                // If the ID has changed (e.g., marked as seen and renamed), update it in the DOM
+                if (email.id !== id) {
+                    const tr = document.querySelector(`.mail-item[data-id="${id}"]`);
+                    if (tr) {
+                        tr.dataset.id = email.id;
+                        const chk = tr.querySelector('.mail-item-chk');
+                        if (chk) chk.dataset.id = email.id;
+                        const star = tr.querySelector('.star-btn');
+                        if (star) star.dataset.id = email.id;
+                    }
+                    if (state.selectedEmailId === id) state.selectedEmailId = email.id;
+                    const emailInState2 = state.emails.find(e => e.id === id);
+                    if (emailInState2) emailInState2.id = email.id;
+                }
+
+                readSubject.innerHTML = `<i class="fa-regular fa-envelope" style="margin-right: 12px; opacity: 0.5; font-size: 0.9em;"></i>${escapeHtml(email.subject)}`;
+                readFrom.textContent = email.from;
+                readTo.textContent = email.to;
+                readDate.textContent = email.date;
+
+                // Requirements 3.1: 다크 테마 배경 투명 및 글자색 연동
+                let bodyBg = '#161621'; // Solid dark theme bg
+                let bodyColor = '#f3f4f6';
+                let linkColor = '#c084fc';
+                
+                const isWhiteTheme = document.body.classList.contains('theme-white');
+                if (isWhiteTheme) {
+                    bodyBg = '#ffffff';
+                    bodyColor = '#333333';
+                    linkColor = '#4f46e5';
+                } else if (document.body.classList.contains('theme-gray')) {
+                    bodyBg = '#18181b'; // zinc-900
+                    bodyColor = '#f4f4f5'; // zinc-100
+                    linkColor = '#cbd5e1'; // zinc-300
+                } else if (document.body.classList.contains('theme-black')) {
+                    bodyBg = '#000000';
+                    bodyColor = '#e2e8f0';
+                    linkColor = '#ffffff';
+                }
+                
+                // Generate theme override CSS if dark mode is active
+                const themeOverrideCss = !isWhiteTheme ? `
+                    html, body {
+                        background-color: ${bodyBg} !important;
+                        color: ${bodyColor} !important;
+                    }
+                    div, table, td, tr, p, span, section, article, header, footer, h1, h2, h3, h4, h5, h6, font {
+                        background-color: transparent !important;
+                        color: inherit !important;
+                    }
+                    a, a * {
+                        color: ${linkColor} !important;
+                    }
+                ` : `
+                    html, body {
+                        background-color: ${bodyBg};
+                        color: ${bodyColor};
+                    }
+                `;
+                
+                const content = `
+                    <html>
+                    <head>
+                        <style>
+                            body {
+                                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                                font-size: 14px;
+                                line-height: 1.6;
+                                padding: 24px;
+                                margin: 0;
+                            }
+                            a { color: ${linkColor}; }
+                            ${themeOverrideCss}
+                        </style>
+                    </head>
+                    <body>
+                        ${email.body || '(내용 없음)'}
+                    </body>
+                    </html>
+                `;
+                
+                // Render email body inside sandboxed iframe using srcdoc for modern browser support and security compliance
+                mailBodyFrame.srcdoc = content;
+                console.log("mailBodyFrame srcdoc successfully assigned.");
+
+                // Display attachments if present in the email
+                const readAttachments = document.getElementById('read-attachments');
+                const attachmentsCount = document.getElementById('attachments-count');
+                const readAttachmentsList = document.getElementById('read-attachments-list');
+                
+                if (readAttachments && readAttachmentsList && attachmentsCount) {
+                    const attachments = email.attachments || [];
+                    if (attachments.length > 0) {
+                        readAttachments.classList.remove('hidden');
+                        attachmentsCount.textContent = attachments.length;
+                        readAttachmentsList.innerHTML = '';
+                        
+                        attachments.forEach(att => {
+                            const a = document.createElement('a');
+                            a.href = `data:${att.content_type};base64,${att.data}`;
+                            a.download = att.filename;
+                            a.className = 'read-attachment-item';
+                            
+                            const sizeKB = (att.size / 1024).toFixed(1);
+                            
+                            a.innerHTML = `
+                                <i class="fa-solid fa-file-arrow-down"></i>
+                                <span>${escapeHtml(att.filename)}</span>
+                                <span style="color: var(--text-muted);">(${sizeKB} KB)</span>
+                            `;
+                            readAttachmentsList.appendChild(a);
+                        });
+                    } else {
+                        readAttachments.classList.add('hidden');
+                    }
+                }
+
+                // Setup reply / forward actions based on selected mail
+                btnReply.onclick = () => openCompose(email.from, `Re: ${email.subject}`, `\n\n--- Original Message ---\nFrom: ${email.from}\nTo: ${email.to}\nDate: ${email.date}\n\n${email.text_body || ''}`);
+                btnForward.onclick = () => openCompose('', `Fwd: ${email.subject}`, `\n\n--- Original Message ---\nFrom: ${email.from}\nTo: ${email.to}\nDate: ${email.date}\n\n${email.text_body || ''}`);
+                btnDeleteMail.onclick = () => deleteEmail(id);
+
+                // Mark locally as seen, update ID to the server's new ID, and update badge
+                const targetBase2 = getBaseId(id);
+                const emailInState2 = state.emails.find(e => getBaseId(e.id) === targetBase2);
+                if (emailInState2) {
+                    emailInState2.seen = true;
+                    emailInState2.id = res.email.id; // Update to the new ID with flags
+                }
+                
+                // Synchronize the DOM element's dataset.id to the new ID
+                const el = document.querySelector(`.mail-item[data-id="${id}"]`);
+                if (el) {
+                    el.dataset.id = res.email.id;
+                }
+                
+                // Update selected ID to the new ID
+                state.selectedEmailId = res.email.id;
+                
+                updateGlobalUnreadCount();
+                showToast("이메일 로드 완료!", 1500);
+            } else {
+                showToast("이메일 불러오기 실패: " + (res.message || "알 수 없는 오류"));
+            }
+        } catch (err) {
+            console.error("selectEmail runtime error:", err);
+            alert("JS Error in selectEmail: " + err.message + "\nStack: " + err.stack);
+            showToast("이메일 처리 중 오류 발생: " + err.message);
         }
     }
 
@@ -2595,6 +2737,902 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
+    // --------------------------------------------------
+    // SIDEBAR MULTI-ACCOUNT RENDER SYSTEM
+    // --------------------------------------------------
+    async function loadExternalMailsAndRenderSidebar(folderToLoad = null) {
+        try {
+            const res = await apiRequest('list_external_mails');
+            if (res.success) {
+                state.externalMails = res.accounts || [];
+                await renderSidebar(folderToLoad);
+            }
+        } catch (err) {
+            console.error('Error listing external mails:', err);
+        }
+    }
+
+    async function renderSidebar(folderToLoad = null) {
+        const sidebarNav = document.querySelector('.sidebar-nav');
+        if (!sidebarNav) return;
+
+        const activeAccounts = (state.externalMails || []).filter(a => a.is_active === 1);
+
+        if (activeAccounts.length <= 1) {
+            // Render single account (standard) sidebar
+            sidebarNav.innerHTML = `
+                <a href="#" class="nav-item" data-folder="INBOX">
+                    <i class="fa-solid fa-inbox"></i>
+                    <span class="nav-label">받은 편지함</span>
+                    <span id="badge-unread" class="badge" style="display:none;">0</span>
+                </a>
+                <a href="#" class="nav-item" data-folder="Starred">
+                    <i class="fa-solid fa-star" style="color: var(--color-warning, #f59e0b);"></i>
+                    <span class="nav-label">즐겨찾기</span>
+                </a>
+                <a href="#" class="nav-item" data-folder="Sent">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    <span class="nav-label">보낸 편지함</span>
+                </a>
+                <a href="#" class="nav-item" data-folder="Drafts">
+                    <i class="fa-solid fa-file-signature"></i>
+                    <span class="nav-label">임시 보관함</span>
+                </a>
+                <a href="#" class="nav-item" data-folder="Trash">
+                    <i class="fa-solid fa-trash-can"></i>
+                    <span class="nav-label">휴지통</span>
+                </a>
+
+                <!-- Collapsible Tags Menu -->
+                <div class="tags-menu-container" id="tags-menu-container" style="position: relative;">
+                    <div class="nav-item" id="btn-toggle-tags">
+                        <i class="fa-solid fa-box-archive"></i>
+                        <span class="nav-label">개인 보관함</span>
+                        <i class="fa-solid fa-caret-down arrow-icon" id="tags-menu-arrow"></i>
+                    </div>
+                    
+                    <div id="tags-popover" class="tags-popover hidden">
+                        <div class="tags-popover-arrow"></div>
+                        <div id="tags-popover-list" class="tags-popover-list"></div>
+                    </div>
+                    
+                    <div id="sidebar-tags-wrapper" class="sidebar-tags-wrapper">
+                        <div id="sidebar-tags-container" class="sidebar-tags"></div>
+                    </div>
+                </div>
+            `;
+            
+            bindSidebarListeners();
+            await loadTags();
+        } else {
+            // Render multi-account sidebar
+            let html = `
+                <a href="#" class="nav-item" data-folder="unified_inbox">
+                    <i class="fa-solid fa-envelopes-bulk" style="color: var(--color-primary);"></i>
+                    <span class="nav-label">전체 받은 편지함</span>
+                </a>
+            `;
+
+            activeAccounts.forEach(acc => {
+                const isCollapsed = state.sidebarCollapsedGroups[acc.id] === true;
+                const serviceType = acc.service_type;
+                // Icon selection based on service type
+                const iconMap = {
+                    'onto': 'fa-envelope',
+                    'naver': 'fa-envelope-circle-check',
+                    'gmail': 'fa-envelope-open',
+                    'daum': 'fa-paper-plane',
+                    'kakao': 'fa-comments',
+                    'custom': 'fa-server'
+                };
+                const serviceIcon = iconMap[serviceType] || 'fa-envelope';
+                const serviceLabel = serviceType === 'onto' ? 'OnTo' : (serviceType === 'custom' ? acc.email : `${serviceType.charAt(0).toUpperCase() + serviceType.slice(1)} (${acc.email})`);
+                
+                html += `
+                    <div class="sidebar-group-header ${isCollapsed ? 'collapsed' : ''}" data-group-id="${acc.id}">
+                        <div class="group-title">
+                            <i class="fa-solid ${serviceIcon} group-mail-icon" style="color: ${acc.color};"></i>
+                            <span class="group-label">${escapeHtml(serviceLabel)}</span>
+                        </div>
+                        <i class="fa-solid fa-caret-down group-arrow"></i>
+                    </div>
+                    <div class="sidebar-group-submenu ${isCollapsed ? 'collapsed' : ''}" id="submenu_${acc.id}">
+                        <div class="submenu-inner">
+                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_INBOX">
+                            <i class="fa-solid fa-inbox"></i>
+                            <span class="nav-label">받은 편지함</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Sent">
+                            <i class="fa-solid fa-paper-plane"></i>
+                            <span class="nav-label">보낸 편지함</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Drafts">
+                            <i class="fa-solid fa-file-signature"></i>
+                            <span class="nav-label">임시 보관함</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Trash">
+                            <i class="fa-solid fa-trash-can"></i>
+                            <span class="nav-label">휴지통</span>
+                        </a>
+                `;
+
+                if (acc.service_type === 'onto') {
+                    html += `
+                        <!-- Collapsible Tags Menu inside OnTo -->
+                        <div class="tags-menu-container" id="tags-menu-container" style="position: relative; margin-top: 4px;">
+                            <div class="nav-item" id="btn-toggle-tags" style="padding-left: 12px !important;">
+                                <i class="fa-solid fa-box-archive"></i>
+                                <span class="nav-label">개인 보관함</span>
+                                <i class="fa-solid fa-caret-down arrow-icon" id="tags-menu-arrow"></i>
+                            </div>
+                            
+                            <div id="tags-popover" class="tags-popover hidden">
+                                <div class="tags-popover-arrow"></div>
+                                <div id="tags-popover-list" class="tags-popover-list"></div>
+                            </div>
+                            
+                            <div id="sidebar-tags-wrapper" class="sidebar-tags-wrapper">
+                                <div id="sidebar-tags-container" class="sidebar-tags"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `</div></div>`; // close submenu-inner + sidebar-group-submenu
+            });
+
+            sidebarNav.innerHTML = html;
+
+            bindSidebarListeners();
+            bindMultiAccountGroupListeners();
+
+            const ontoActive = activeAccounts.some(a => a.service_type === 'onto');
+            if (ontoActive) {
+                await loadTags();
+            }
+        }
+
+        if (folderToLoad) {
+            state.currentFolder = folderToLoad;
+        }
+        syncActiveFolderUI();
+    }
+
+    function bindSidebarListeners() {
+        const items = document.querySelectorAll('.sidebar-nav .nav-item');
+        items.forEach(item => {
+            if (item.id === 'btn-toggle-tags' || item.classList.contains('sidebar-group-header')) return;
+            
+            // Re-bind click listener safely
+            const newItem = item.cloneNode(true);
+            item.parentNode.replaceChild(newItem, item);
+            
+            newItem.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                readerEmpty.classList.remove('hidden');
+                readerContent.classList.add('hidden');
+                state.selectedEmailId = null;
+
+                const folder = newItem.dataset.folder;
+                setCookie('currentFolder', folder);
+                loadEmails(folder);
+            });
+        });
+
+        // Re-bind tags toggle
+        const btnToggleTags = document.getElementById('btn-toggle-tags');
+        const sidebarTagsContainer = document.getElementById('sidebar-tags-container');
+        const sidebarTagsWrapper = document.getElementById('sidebar-tags-wrapper');
+        const tagsMenuArrow = document.getElementById('tags-menu-arrow');
+        
+        if (btnToggleTags && sidebarTagsContainer && sidebarTagsWrapper) {
+            btnToggleTags.addEventListener('click', async (e) => {
+                if (e.target.closest('#btn-manage-tags')) {
+                    return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const tagsPopover = document.getElementById('tags-popover');
+                
+                if (sidebar.classList.contains('collapsed') && tagsPopover && !tagsPopover.classList.contains('hidden')) {
+                    tagsPopover.classList.add('hidden');
+                    return;
+                }
+                
+                if (!sidebar.classList.contains('collapsed') && sidebarTagsWrapper.classList.contains('expanded')) {
+                    sidebarTagsWrapper.classList.remove('expanded');
+                    if (tagsMenuArrow) tagsMenuArrow.classList.remove('rotated');
+                    state.personalFolderExpanded = false;
+                    localStorage.setItem('mail-personal-folder-expanded', 'false');
+                    return;
+                }
+                
+                try {
+                    const res = await apiRequest('list_tags');
+                    const tags = res.success ? (res.tags || []) : [];
+                    
+                    if (tags.length === 0) {
+                        if (tagsMenuArrow) {
+                            tagsMenuArrow.classList.add('rotated');
+                            setTimeout(() => {
+                                tagsMenuArrow.classList.remove('rotated');
+                            }, 300);
+                        }
+                        showPersonalFolderTooltip();
+                        if (tagsPopover) tagsPopover.classList.add('hidden');
+                        sidebarTagsWrapper.classList.remove('expanded');
+                        return;
+                    }
+                    
+                    if (sidebar.classList.contains('collapsed')) {
+                        if (tagsPopover) {
+                            renderTagsPopoverList(tags);
+                            tagsPopover.classList.remove('hidden');
+                        }
+                    } else {
+                        if (tagsPopover) tagsPopover.classList.add('hidden');
+                        sidebarTagsContainer.innerHTML = '';
+                        tags.forEach(t => {
+                            const tag = t.name;
+                            const a = document.createElement('a');
+                            a.href = '#';
+                            a.className = `tag-item ${tag === state.currentFolder ? 'active' : ''}`;
+                            a.dataset.folder = tag;
+                            const folderColor = getFolderColor(tag);
+                            a.innerHTML = `<i class="fa-solid fa-folder" style="color: ${folderColor};"></i><span class="nav-label">${escapeHtml(tag)}</span>`;
+                            a.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                
+                                readerEmpty.classList.remove('hidden');
+                                readerContent.classList.add('hidden');
+                                state.selectedEmailId = null;
+
+                                setCookie('currentFolder', tag);
+                                loadEmails(tag);
+                            });
+                            sidebarTagsContainer.appendChild(a);
+                        });
+                        sidebarTagsWrapper.classList.add('expanded');
+                        if (tagsMenuArrow) tagsMenuArrow.classList.add('rotated');
+                        state.personalFolderExpanded = true;
+                        localStorage.setItem('mail-personal-folder-expanded', 'true');
+                    }
+                } catch (err) {
+                    console.error('Error toggling tags:', err);
+                }
+            });
+        }
+    }
+
+    function bindMultiAccountGroupListeners() {
+        const headers = document.querySelectorAll('.sidebar-group-header');
+        headers.forEach(header => {
+            header.addEventListener('click', (e) => {
+                const id = header.dataset.groupId;
+                const submenu = document.getElementById(`submenu_${id}`);
+                if (!submenu) return;
+                
+                const isCollapsed = submenu.classList.contains('collapsed');
+                if (isCollapsed) {
+                    submenu.classList.remove('collapsed');
+                    header.classList.remove('collapsed');
+                    state.sidebarCollapsedGroups[id] = false;
+                } else {
+                    submenu.classList.add('collapsed');
+                    header.classList.add('collapsed');
+                    state.sidebarCollapsedGroups[id] = true;
+                }
+                localStorage.setItem('mail-sidebar-collapsed-groups', JSON.stringify(state.sidebarCollapsedGroups));
+            });
+        });
+    }
+
+    // --------------------------------------------------
+    // EXTERNAL MAIL CONFIGURATION SCREEN UI
+    // --------------------------------------------------
+    const btnManageExternalMail = document.getElementById('btn-manage-external-mail');
+    const externalMailModal = document.getElementById('external-mail-modal');
+    const btnCloseExternalMail = document.getElementById('btn-close-external-mail');
+    const btnAddExternalMail = document.getElementById('btn-add-external-mail');
+    const externalMailAccountsList = document.getElementById('external-mail-accounts-list');
+    const externalMailDetailPane = document.getElementById('external-mail-detail-pane');
+
+    if (btnManageExternalMail && externalMailModal) {
+        btnManageExternalMail.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            externalMailModal.classList.remove('hidden');
+            loadExternalMailSettingsList();
+        });
+    }
+
+    if (btnCloseExternalMail && externalMailModal) {
+        btnCloseExternalMail.addEventListener('click', () => {
+            externalMailModal.classList.add('hidden');
+        });
+    }
+
+    async function loadExternalMailSettingsList(selectedAccountId = null) {
+        if (!externalMailAccountsList) return;
+        externalMailAccountsList.innerHTML = '<div style="color:var(--text-secondary); text-align:center; padding: 20px 0;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</div>';
+        
+        try {
+            const res = await apiRequest('list_external_mails');
+            if (res.success) {
+                state.externalMails = res.accounts || [];
+                renderExternalMailAccountsList(selectedAccountId);
+            } else {
+                showToast(res.message);
+            }
+        } catch (err) {
+            console.error('Error loading external mail accounts:', err);
+        }
+    }
+
+    function renderExternalMailAccountsList(selectedAccountId = null) {
+        if (!externalMailAccountsList) return;
+        externalMailAccountsList.innerHTML = '';
+        
+        if (state.externalMails.length === 0) {
+            externalMailAccountsList.innerHTML = '<div style="color:var(--text-secondary); text-align:center; padding: 20px 0; font-size:12px;">등록된 메일 계정이 없습니다.</div>';
+            return;
+        }
+
+        state.externalMails.forEach(acc => {
+            const item = document.createElement('div');
+            item.className = `external-mail-account-item ${acc.is_active ? '' : 'inactive'} ${selectedAccountId == acc.id ? 'active' : ''}`;
+            item.dataset.id = acc.id;
+            item.draggable = acc.service_type !== 'onto';
+            
+            const serviceIcon = getServiceIcon(acc.service_type);
+            const serviceLabel = acc.service_type === 'onto' ? 'OnTo Mail (기본)' : getServiceLabel(acc.service_type);
+            
+            item.innerHTML = `
+                <span class="service-icon" style="color: ${acc.color};">${serviceIcon}</span>
+                <div class="account-info">
+                    <span class="account-name">${escapeHtml(serviceLabel)}</span>
+                    <span class="account-email">${escapeHtml(acc.email)}</span>
+                </div>
+            `;
+            
+            if (acc.service_type !== 'onto') {
+                item.addEventListener('dragstart', (e) => {
+                    item.classList.add('dragging');
+                    e.dataTransfer.setData('text/plain', acc.id);
+                });
+
+                item.addEventListener('dragend', () => {
+                    item.classList.remove('dragging');
+                    saveExternalMailOrder();
+                });
+
+                item.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    const draggingItem = externalMailAccountsList.querySelector('.dragging');
+                    if (draggingItem && draggingItem !== item) {
+                        const bounding = item.getBoundingClientRect();
+                        const offset = e.clientY - bounding.top;
+                        const prev = item.previousElementSibling;
+                        if (prev && prev.dataset.id && prev.classList.contains('external-mail-account-item')) {
+                            if (offset > bounding.height / 2) {
+                                item.after(draggingItem);
+                            } else {
+                                item.before(draggingItem);
+                            }
+                        } else {
+                            item.after(draggingItem);
+                        }
+                    }
+                });
+            }
+
+            item.addEventListener('click', () => {
+                externalMailAccountsList.querySelectorAll('.external-mail-account-item').forEach(el => el.classList.remove('active'));
+                item.classList.add('active');
+                renderExternalMailDetail(acc);
+            });
+
+            externalMailAccountsList.appendChild(item);
+        });
+
+        if (selectedAccountId) {
+            const activeItem = externalMailAccountsList.querySelector(`.external-mail-account-item[data-id="${selectedAccountId}"]`);
+            if (activeItem) activeItem.click();
+        } else if (state.externalMails.length > 0) {
+            const firstItem = externalMailAccountsList.querySelector('.external-mail-account-item');
+            if (firstItem) firstItem.click();
+        }
+    }
+
+    async function saveExternalMailOrder() {
+        const items = externalMailAccountsList.querySelectorAll('.external-mail-account-item');
+        const order = [];
+        items.forEach(item => {
+            const id = parseInt(item.dataset.id);
+            if (id) order.push(id);
+        });
+
+        try {
+            const res = await apiRequest('update_external_mail_order', 'POST', { order: JSON.stringify(order) });
+            if (res.success) {
+                loadExternalMailsAndRenderSidebar(state.currentFolder);
+            } else {
+                showToast(res.message);
+            }
+        } catch (err) {
+            console.error('Error saving external mail order:', err);
+        }
+    }
+
+    function getServiceIcon(type) {
+        switch (type) {
+            case 'onto': return '<i class="fa-regular fa-envelope"></i>';
+            case 'gmail': return '<i class="fa-brands fa-google"></i>';
+            case 'outlook': return '<i class="fa-brands fa-microsoft"></i>';
+            case 'icloud': return '<i class="fa-solid fa-cloud"></i>';
+            case 'naver': return '<i class="fa-solid fa-n"></i>';
+            case 'daum': return '<i class="fa-solid fa-k"></i>';
+            default: return '<i class="fa-regular fa-envelope-open"></i>';
+        }
+    }
+
+    function getServiceLabel(type) {
+        switch (type) {
+            case 'onto': return 'OnTo';
+            case 'gmail': return 'Google Gmail';
+            case 'outlook': return 'Outlook';
+            case 'icloud': return 'Apple iCloud';
+            case 'naver': return 'Naver 메일';
+            case 'daum': return 'Daum / Kakao 메일';
+            default: return '기타 사용자 IMAP';
+        }
+    }
+
+    if (btnAddExternalMail) {
+        btnAddExternalMail.addEventListener('click', () => {
+            if (externalMailAccountsList) {
+                externalMailAccountsList.querySelectorAll('.external-mail-account-item').forEach(el => el.classList.remove('active'));
+            }
+            renderExternalMailDetail(null);
+        });
+    }
+
+    function renderExternalMailDetail(acc) {
+        if (!externalMailDetailPane) return;
+        
+        // Scroll right detailed view to top
+        externalMailDetailPane.scrollTop = 0;
+        
+        const isNew = !acc;
+        const isOnto = acc && acc.service_type === 'onto';
+        
+        const dispUsername = isOnto ? (acc.mail_username.includes('@') ? acc.mail_username.split('@')[0] : acc.mail_username) : (acc ? acc.mail_username : '');
+        
+        let headerTitle = isNew ? '새 메일 계정 추가' : `${escapeHtml(getServiceLabel(acc.service_type))} 설정`;
+        if (isOnto) headerTitle = 'OnTo 기본 메일 설정 (읽기 전용)';
+
+        // 10 theme colors
+        const colorList = [
+            '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
+            '#06b6d4', '#f97316', '#14b8a6', '#a855f7', '#e11d48'
+        ];
+        let colorHtml = '';
+        const activeColor = acc ? acc.color : '#3b82f6';
+        
+        colorList.forEach(c => {
+            colorHtml += `
+                <div class="color-palette-btn ${activeColor === c ? 'selected' : ''}" 
+                     style="background-color: ${c};" 
+                     data-color="${c}">
+                </div>
+            `;
+        });
+
+        const serviceSelectHtml = `
+            <div class="custom-select-wrapper" style="width: 100%;">
+                <select id="detail-service-type" ${isOnto ? 'disabled' : ''}>
+                    <option value="gmail" ${acc && acc.service_type === 'gmail' ? 'selected' : ''}>Google Gmail</option>
+                    <option value="outlook" ${acc && acc.service_type === 'outlook' ? 'selected' : ''}>Outlook / Hotmail</option>
+                    <option value="icloud" ${acc && acc.service_type === 'icloud' ? 'selected' : ''}>Apple iCloud</option>
+                    <option value="naver" ${acc && acc.service_type === 'naver' ? 'selected' : ''}>Naver 메일</option>
+                    <option value="daum" ${acc && acc.service_type === 'daum' ? 'selected' : ''}>Daum / Kakao 메일</option>
+                    <option value="custom" ${isNew || (acc && acc.service_type === 'custom') ? 'selected' : ''}>(직접 입력)</option>
+                </select>
+            </div>
+        `;
+
+        let html = `
+            <form id="form-external-mail-detail" class="settings-form-section" novalidate>
+                <input type="hidden" id="detail-id" value="${acc ? acc.id : ''}">
+                <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 8px;">
+                    <h4 style="font-size: 15px; font-weight: bold; display: flex; align-items: center; gap: 8px; color: var(--text-primary);">
+                        ${isNew ? '<i class="fa-solid fa-circle-plus" style="color:var(--color-primary);"></i>' : '<i class="fa-solid fa-circle-info" style="color:var(--color-primary);"></i>'}
+                        ${headerTitle}
+                    </h4>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+                    <div style="display:flex; flex-direction:column; gap: 2px;">
+                        <span style="font-size: 13px; font-weight: bold; color: var(--text-primary);">계정 활성화 상태</span>
+                        <span style="font-size: 11px; color: var(--text-secondary);">해당 계정을 메일함 목록에 노출하고 동기화합니다.</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="detail-is-active" ${(!acc || acc.is_active) ? 'checked' : ''}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>메일 구분 색상</label>
+                    <div class="color-palette-selector">
+                        ${colorHtml}
+                        <input type="hidden" id="detail-color" value="${activeColor}">
+                    </div>
+                </div>
+
+                ${isOnto ? `
+                    <div class="input-grid-2x2">
+                        <div class="form-group">
+                            <label for="detail-email">이메일 이름</label>
+                            <input type="email" id="detail-email" value="${acc ? escapeHtml(acc.email) : ''}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label for="detail-mail-username">로그인 아이디</label>
+                            <input type="text" id="detail-mail-username" value="${dispUsername}" readonly>
+                        </div>
+                    </div>
+                ` : `
+                    <div class="input-grid-2x2">
+                        <div class="form-group">
+                            <label for="detail-service-type">서비스 유형</label>
+                            ${serviceSelectHtml}
+                        </div>
+                        <div class="form-group">
+                            <label for="detail-email">이메일 이름</label>
+                            <input type="email" id="detail-email" placeholder="이메일 이름" value="${acc ? escapeHtml(acc.email) : ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="detail-mail-username">로그인 아이디</label>
+                            <input type="text" id="detail-mail-username" placeholder="아이디 입력" value="${acc ? escapeHtml(acc.mail_username) : ''}">
+                        </div>
+                        <div class="form-group">
+                            <label for="detail-mail-password">암호</label>
+                            <input type="password" id="detail-mail-password" placeholder="${isNew ? '암호 입력' : '변경할 때만 입력'}">
+                        </div>
+                    </div>
+                    <p style="font-size: 11px; color: var(--text-muted); margin-top: -6px; margin-bottom: 4px; line-height: 1.3;">
+                        <i class="fa-solid fa-circle-question"></i> 구글, 네이버 등은 2단계 인증 후 <strong>앱 비밀번호</strong>를 생성해 입력하세요.
+                    </p>
+                `}
+
+                ${isOnto ? `
+                    <div style="background: rgba(59,130,246,0.06); padding: 16px; border: 1px dashed rgba(59,130,246,0.3); border-radius: var(--radius-sm); margin-top: 10px; display:flex; flex-direction:column; gap:12px;">
+                        <h5 style="font-size:12px; font-weight:bold; color: var(--color-primary); display:flex; align-items:center; gap:6px;">
+                            <i class="fa-solid fa-circle-nodes"></i> 외부 클라이언트 연동 정보 (IMAP / SMTP)
+                        </h5>
+                        <p style="font-size:11px; line-height:1.4; color: var(--text-secondary);">
+                            스마트폰 메일 앱이나 아웃룩 등 외부 메일 프로그램에서 OnTo 계정 메일을 받아보려면 아래 정보를 입력하세요.
+                        </p>
+                        <div class="server-settings-grid" style="font-size:12px; grid-template-columns: 1.5fr 1fr 1fr; border-top:1px solid rgba(255,255,255,0.05); padding-top:10px; gap:8px;">
+                            <div>
+                                <strong style="color:var(--text-primary); display:block; margin-bottom:2px;">수신 서버 (IMAP)</strong>
+                                <span style="color:var(--text-secondary);">mail.onto.kr</span>
+                            </div>
+                            <div>
+                                <strong style="color:var(--text-primary); display:block; margin-bottom:2px;">포트번호</strong>
+                                <span style="color:var(--text-secondary);">993 (SSL)</span>
+                            </div>
+                            <div>
+                                <strong style="color:var(--text-primary); display:block; margin-bottom:2px;">보안타입</strong>
+                                <span style="color:var(--text-secondary);">SSL / TLS</span>
+                            </div>
+                        </div>
+                        <div class="server-settings-grid" style="font-size:12px; grid-template-columns: 1.5fr 1fr 1fr; gap:8px;">
+                            <div>
+                                <strong style="color:var(--text-primary); display:block; margin-bottom:2px;">송신 서버 (SMTP)</strong>
+                                <span style="color:var(--text-secondary);">mail.onto.kr</span>
+                            </div>
+                            <div>
+                                <strong style="color:var(--text-primary); display:block; margin-bottom:2px;">포트번호</strong>
+                                <span style="color:var(--text-secondary);">465 (SSL)</span>
+                            </div>
+                            <div>
+                                <strong style="color:var(--text-primary); display:block; margin-bottom:2px;">보안타입</strong>
+                                <span style="color:var(--text-secondary);">SSL / TLS</span>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+
+                ${isOnto ? '' : `
+                    <div id="custom-server-settings" class="hidden" style="background: rgba(255,255,255,0.02); padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); margin-top: 10px; display:flex; flex-direction:column; gap:12px;">
+                        <h5 style="font-size:12px; font-weight:bold; color:var(--text-primary);"><i class="fa-solid fa-server"></i> 서버 수동 설정</h5>
+                        <div class="server-settings-grid">
+                            <div class="form-group">
+                                <label for="detail-imap-host">IMAP 서버 호스트</label>
+                                <input type="text" id="detail-imap-host" placeholder="imap.domain.com" value="${acc ? escapeHtml(acc.imap_host || '') : ''}">
+                            </div>
+                            <div class="form-group">
+                                <label for="detail-imap-port">IMAP 포트</label>
+                                <input type="text" id="detail-imap-port" value="${acc ? acc.imap_port : '993'}">
+                            </div>
+                            <div class="form-group">
+                                <label for="detail-imap-ssl">IMAP 보안</label>
+                                <select id="detail-imap-ssl">
+                                    <option value="ssl" ${acc && acc.imap_ssl === 'ssl' ? 'selected' : ''}>SSL</option>
+                                    <option value="tls" ${acc && acc.imap_ssl === 'tls' ? 'selected' : ''}>TLS</option>
+                                    <option value="none" ${acc && acc.imap_ssl === 'none' ? 'selected' : ''}>없음</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="server-settings-grid">
+                            <div class="form-group">
+                                <label for="detail-smtp-host">SMTP 서버 호스트</label>
+                                <input type="text" id="detail-smtp-host" placeholder="smtp.domain.com" value="${acc ? escapeHtml(acc.smtp_host || '') : ''}">
+                            </div>
+                            <div class="form-group">
+                                <label for="detail-smtp-port">SMTP 포트</label>
+                                <input type="text" id="detail-smtp-port" value="${acc ? acc.smtp_port : '465'}">
+                            </div>
+                            <div class="form-group">
+                                <label for="detail-smtp-ssl">SMTP 보안</label>
+                                <select id="detail-smtp-ssl">
+                                    <option value="ssl" ${acc && acc.smtp_ssl === 'ssl' ? 'selected' : ''}>SSL</option>
+                                    <option value="tls" ${acc && acc.smtp_ssl === 'tls' ? 'selected' : ''}>TLS</option>
+                                    <option value="none" ${acc && acc.smtp_ssl === 'none' ? 'selected' : ''}>없음</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group" style="flex-direction:row; align-items:center; gap:8px;">
+                            <input type="checkbox" id="detail-smtp-auth" ${(!acc || acc.smtp_auth) ? 'checked' : ''} style="width:auto; cursor:pointer;">
+                            <label for="detail-smtp-auth" style="font-weight:normal; cursor:pointer; user-select:none;">SMTP 서버 로그인 인증 필요</label>
+                        </div>
+                    </div>
+                `}
+
+                <div class="btn-row">
+                    <div>
+                        ${(!isNew && !isOnto) ? `
+                            <button type="button" id="btn-delete-external-mail" class="btn-submit btn-danger-action" style="padding: 10px 16px;">
+                                <i class="fa-solid fa-trash-can"></i> 계정 삭제
+                            </button>
+                        ` : ''}
+                    </div>
+                    <button type="submit" class="btn-submit" style="padding: 10px 24px;">
+                        <i class="fa-solid fa-check"></i> ${isNew ? '추가 완료' : '설정 저장'}
+                    </button>
+                </div>
+            </form>
+        `;
+
+        externalMailDetailPane.innerHTML = html;
+        externalMailDetailPane.scrollTop = 0;
+        setTimeout(() => {
+            externalMailDetailPane.scrollTop = 0;
+        }, 50);
+
+        const colorBtns = externalMailDetailPane.querySelectorAll('.color-palette-btn');
+        const colorInput = externalMailDetailPane.querySelector('#detail-color');
+        colorBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                colorBtns.forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                if (colorInput) colorInput.value = btn.dataset.color;
+            });
+        });
+
+        const serviceSelect = externalMailDetailPane.querySelector('#detail-service-type');
+        const customServerSettings = externalMailDetailPane.querySelector('#custom-server-settings');
+        
+        function checkServiceType() {
+            if (!serviceSelect || !customServerSettings) return;
+            if (serviceSelect.value === 'custom') {
+                customServerSettings.classList.remove('hidden');
+            } else {
+                customServerSettings.classList.add('hidden');
+            }
+        }
+        
+        if (serviceSelect) {
+            serviceSelect.addEventListener('change', checkServiceType);
+            checkServiceType();
+        }
+
+        const btnDeleteAcc = externalMailDetailPane.querySelector('#btn-delete-external-mail');
+        if (btnDeleteAcc && acc) {
+            btnDeleteAcc.addEventListener('click', async () => {
+                if (!await customConfirm(`'${acc.email}' 계정 연동을 완전히 해제하고 삭제하시겠습니까?`, 'fa-solid fa-triangle-exclamation')) return;
+                
+                showToast('계정 연동 해제 중...');
+                try {
+                    const res = await apiRequest('delete_external_mail', 'POST', { id: acc.id });
+                    showToast(res.message);
+                    if (res.success) {
+                        externalMailDetailPane.innerHTML = `
+                            <div class="detail-placeholder" style="margin: auto; text-align: center; color: var(--text-muted); opacity: 0.6;">
+                                <i class="fa-solid fa-envelope-open-text" style="font-size: 48px; margin-bottom: 12px; display: block;"></i>
+                                <span>메일 계정이 성공적으로 삭제되었습니다.</span>
+                            </div>
+                        `;
+                        loadExternalMailSettingsList();
+                        loadExternalMailsAndRenderSidebar(state.currentFolder);
+                    }
+                } catch (err) {
+                    console.error('Error deleting account:', err);
+                }
+            });
+        }
+
+        const formDetail = externalMailDetailPane.querySelector('#form-external-mail-detail');
+        if (formDetail) {
+            formDetail.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                // Clear previous validation errors
+                externalMailDetailPane.querySelectorAll('.validation-error').forEach(el => el.classList.remove('validation-error'));
+                externalMailDetailPane.querySelectorAll('.validation-error-balloon').forEach(el => el.remove());
+                
+                let isValid = true;
+                function showError(inputId, message) {
+                    const input = document.getElementById(inputId);
+                    if (input) {
+                        input.classList.add('validation-error');
+                        const container = input.parentNode;
+                        container.style.position = 'relative'; // Ensure relative positioning
+                        
+                        const balloon = document.createElement('div');
+                        balloon.className = 'validation-error-balloon';
+                        balloon.innerText = message;
+                        container.appendChild(balloon);
+                        
+                        input.addEventListener('input', () => {
+                            input.classList.remove('validation-error');
+                            balloon.remove();
+                        }, { once: true });
+                    }
+                    isValid = false;
+                }
+
+                const id = document.getElementById('detail-id').value;
+                const email = isOnto ? acc.email : document.getElementById('detail-email').value.trim();
+                const mail_username = isOnto ? acc.mail_username : document.getElementById('detail-mail-username').value.trim();
+                const is_active = document.getElementById('detail-is-active').checked ? 1 : 0;
+                const color = colorInput.value;
+                
+                // Email format check
+                if (!isOnto) {
+                    if (!email) {
+                        showError('detail-email', '이메일 이름을 입력해주세요.');
+                    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                        showError('detail-email', '올바른 이메일 형식이 아닙니다.');
+                    }
+                    
+                    if (!mail_username) {
+                        showError('detail-mail-username', '로그인 아이디를 입력해주세요.');
+                    }
+                }
+
+                const data = {
+                    id,
+                    email,
+                    mail_username,
+                    is_active,
+                    color
+                };
+
+                if (!isOnto) {
+                    const service_type = serviceSelect.value;
+                    const mail_password = document.getElementById('detail-mail-password').value;
+                    const smtp_auth = document.getElementById('detail-smtp-auth') && document.getElementById('detail-smtp-auth').checked ? 1 : 0;
+                    
+                    if (isNew && !mail_password) {
+                        showError('detail-mail-password', '암호를 입력해주세요.');
+                    }
+
+                    data.service_type = service_type;
+                    data.mail_password = mail_password;
+                    data.smtp_auth = smtp_auth;
+
+                    if (service_type === 'custom') {
+                        const imap_host = document.getElementById('detail-imap-host').value.trim();
+                        const imap_port = document.getElementById('detail-imap-port').value.trim();
+                        const imap_ssl = document.getElementById('detail-imap-ssl').value;
+                        const smtp_host = document.getElementById('detail-smtp-host').value.trim();
+                        const smtp_port = document.getElementById('detail-smtp-port').value.trim();
+                        const smtp_ssl = document.getElementById('detail-smtp-ssl').value;
+
+                        if (!imap_host) {
+                            showError('detail-imap-host', 'IMAP 호스트를 입력해주세요.');
+                        }
+                        if (!imap_port) {
+                            showError('detail-imap-port', 'IMAP 포트를 입력해주세요.');
+                        } else if (!/^\d+$/.test(imap_port)) {
+                            showError('detail-imap-port', '포트는 숫자만 입력해야 합니다.');
+                        }
+
+                        if (!smtp_host) {
+                            showError('detail-smtp-host', 'SMTP 호스트를 입력해주세요.');
+                        }
+                        if (!smtp_port) {
+                            showError('detail-smtp-port', 'SMTP 포트를 입력해주세요.');
+                        } else if (!/^\d+$/.test(smtp_port)) {
+                            showError('detail-smtp-port', '포트는 숫자만 입력해야 합니다.');
+                        }
+
+                        data.imap_host = imap_host;
+                        data.imap_port = parseInt(imap_port) || 993;
+                        data.imap_ssl = imap_ssl;
+                        data.smtp_host = smtp_host;
+                        data.smtp_port = parseInt(smtp_port) || 465;
+                        data.smtp_ssl = smtp_ssl;
+                    } else {
+                        const defaults = getServiceDefaults(service_type);
+                        Object.assign(data, defaults);
+                    }
+                } else {
+                    data.service_type = 'onto';
+                }
+
+                if (!isValid) {
+                    const firstError = externalMailDetailPane.querySelector('.validation-error');
+                    if (firstError) {
+                        firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        firstError.focus();
+                    }
+                    return;
+                }
+
+                showToast('설정을 저장하는 중...');
+                try {
+                    const res = await apiRequest('save_external_mail', 'POST', data);
+                    showToast(res.message);
+                    if (res.success) {
+                        loadExternalMailSettingsList(id || null);
+                        loadExternalMailsAndRenderSidebar(state.currentFolder);
+                    }
+                } catch (err) {
+                    console.error('Error saving external mail account:', err);
+                }
+            });
+        }
+    }
+
+    function getServiceDefaults(service) {
+        switch (service) {
+            case 'gmail':
+                return {
+                    imap_host: 'imap.gmail.com', imap_port: 993, imap_ssl: 'ssl',
+                    smtp_host: 'smtp.gmail.com', smtp_port: 465, smtp_ssl: 'ssl'
+                };
+            case 'outlook':
+                return {
+                    imap_host: 'outlook.office365.com', imap_port: 993, imap_ssl: 'ssl',
+                    smtp_host: 'smtp.office365.com', smtp_port: 587, smtp_ssl: 'tls'
+                };
+            case 'icloud':
+                return {
+                    imap_host: 'imap.mail.me.com', imap_port: 993, imap_ssl: 'ssl',
+                    smtp_host: 'smtp.mail.me.com', smtp_port: 587, smtp_ssl: 'tls'
+                };
+            case 'naver':
+                return {
+                    imap_host: 'imap.naver.com', imap_port: 993, imap_ssl: 'ssl',
+                    smtp_host: 'smtp.naver.com', smtp_port: 465, smtp_ssl: 'ssl'
+                };
+            case 'daum':
+                return {
+                    imap_host: 'imap.daum.net', imap_port: 993, imap_ssl: 'ssl',
+                    smtp_host: 'smtp.daum.net', smtp_port: 465, smtp_ssl: 'ssl'
+                };
+            default:
+                return {};
+        }
+    }
+
+
+
     // Personal Settings Modal 연동
     if (btnSettings && settingsModal) {
         btnSettings.addEventListener('click', (e) => {
@@ -2732,7 +3770,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // TEXT UTILS
     // --------------------------------------------------
     function escapeHtml(text) {
-        if (!text) return '';
+        if (text === null || text === undefined) return '';
+        const str = String(text);
         const map = {
             '&': '&amp;',
             '<': '&lt;',
@@ -2740,7 +3779,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '"': '&quot;',
             "'": '&#039;'
         };
-        return text.replace(/[&<>"']/g, m => map[m]);
+        return str.replace(/[&<>"']/g, m => map[m]);
     }
 
     function formatDate(timestamp) {
@@ -2756,6 +3795,21 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Otherwise, show MM-DD
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+ 
+    function getEmailAccountColor(email) {
+        if (email.account_color) {
+            return email.account_color;
+        }
+        if (email.account_id && state.externalMails) {
+            const acc = state.externalMails.find(a => a.id == email.account_id);
+            if (acc) return acc.color;
+        }
+        if (state.externalMails) {
+            const ontoAcc = state.externalMails.find(a => a.service_type === 'onto');
+            if (ontoAcc) return ontoAcc.color;
+        }
+        return '#3b82f6';
     }
 
     // --------------------------------------------------
@@ -3522,7 +4576,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         headers.forEach((th) => {
             const colClass = Array.from(th.classList).find(c => c.startsWith('col-'));
-            if (!colClass || colClass === 'col-chk' || colClass === 'col-flag' || colClass === 'col-filler') {
+            if (!colClass || colClass === 'col-chk' || colClass === 'col-starred-filter' || colClass === 'col-flag' || colClass === 'col-filler') {
                 return;
             }
 
@@ -3633,33 +4687,43 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                     
-                    const cells = table.querySelectorAll(`tbody td.${colClass}`);
-                    const canvas = document.createElement('canvas');
-                    const context = canvas.getContext('2d');
-                    let maxWidth = 0;
-                    
-                    // Get font style from header
-                    const thStyle = window.getComputedStyle(th);
-                    context.font = `${thStyle.fontWeight} ${thStyle.fontSize} ${thStyle.fontFamily}`;
-                    maxWidth = Math.max(maxWidth, context.measureText(th.textContent.trim()).width + 40);
-                    
-                    // Measure all visible cells in this column
-                    cells.forEach(td => {
-                        const tdStyle = window.getComputedStyle(td);
-                        context.font = `${tdStyle.fontWeight} ${tdStyle.fontSize} ${tdStyle.fontFamily}`;
-                        // Account for padding and potential icons
-                        let extra = 24;
-                        if (colName === 'subject') extra = 48; // for envelope icons
-                        maxWidth = Math.max(maxWidth, context.measureText(td.textContent.trim()).width + extra);
-                    });
-                    
-                    if (maxWidth < 60) maxWidth = 60;
-                    if (maxWidth > 800) maxWidth = 800; // Limit maximum
-                    
-                    th.style.width = maxWidth + 'px';
+                    // Browser-native auto-fit calculation with transition handling
+                    const oldTableLayout = table.style.tableLayout;
+                    const oldTableWidth = table.style.width;
+                    const oldThWidth = th.style.width;
+
+                    // Disable transitions temporarily during measurement using the existing resizing class
+                    table.classList.add('resizing');
+
+                    table.style.tableLayout = 'auto';
+                    table.style.width = 'auto';
+                    th.style.width = 'auto';
+
+                    // Force browser reflow to get the natural un-truncated content width
+                    let autoWidth = th.offsetWidth;
+
+                    // Restore table styles
+                    table.style.tableLayout = oldTableLayout || 'fixed';
+                    table.style.width = oldTableWidth || '100%';
+                    th.style.width = oldThWidth;
+
+                    // Force layout sync to apply the restored width before re-enabling transitions
+                    table.offsetHeight;
+
+                    // Re-enable transitions
+                    table.classList.remove('resizing');
+
+                    // Add a small safety padding (4px) to prevent rounding-related truncation
+                    autoWidth = Math.ceil(autoWidth) + 4;
+
+                    if (autoWidth < 60) autoWidth = 60;
+                    if (autoWidth > 800) autoWidth = 800; // Limit maximum
+
+                    // Apply the new width, which will trigger the CSS transition
+                    th.style.width = autoWidth + 'px';
                     updateTableMinWidth();
-                    
-                    setCookie('colWidth_' + colName, maxWidth);
+
+                    setCookie('colWidth_' + colName, autoWidth);
                 });
             }
         });

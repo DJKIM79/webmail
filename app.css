@@ -194,6 +194,7 @@ body {
     color: var(--text-secondary);
     text-decoration: none;
     border-radius: var(--radius-md);
+    font-size: 14px;
     font-weight: 500;
     transition: all var(--transition-fast);
 }
@@ -202,6 +203,7 @@ body {
     font-size: 18px;
     width: 20px;
     text-align: center;
+    flex-shrink: 0;
 }
 
 .nav-item:hover {
@@ -216,6 +218,10 @@ body {
 
 .nav-label {
     flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 .badge {
@@ -402,6 +408,13 @@ body {
 .mail-items-list.loading {
     opacity: 0;
 }
+#mail-list-tbody {
+    transition: opacity var(--transition-fast) ease-in-out;
+    opacity: 1;
+}
+#mail-list-tbody.loading-fade {
+    opacity: 0.3;
+}
 
 @keyframes fadeInUp {
     from {
@@ -488,15 +501,7 @@ body {
     font-weight: 400;
 }
 
-.unread-dot {
-    width: 6px;
-    height: 6px;
-    background-color: var(--color-primary);
-    border-radius: 50%;
-    display: inline-block;
-    box-shadow: 0 0 6px var(--color-primary-glow);
-    flex-shrink: 0;
-}
+/* unread-dot removed - replaced by mail-status-icon color */
 
 /* Empty mailbox placeholder */
 .list-empty {
@@ -508,6 +513,33 @@ body {
 .list-empty i {
     font-size: 48px;
     margin-bottom: 16px;
+}
+
+.btn-clear-filter {
+    display: none;
+}
+
+/* 즐겨찾기 필터 상태에서 메일 없을 때: 테이블 아래 렬더링 영역 상하좌우 중앙 */
+.mail-list-empty-overlay {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 13px;
+    min-height: 160px;
+}
+
+.mail-list-empty-overlay i {
+    font-size: 32px;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+.mail-list-empty-overlay.starred-empty i {
+    color: var(--color-warning, #f59e0b);
 }
 
 /* --------------------------------------------------
@@ -530,6 +562,7 @@ body {
     height: 100%;
     color: var(--text-muted);
     gap: 16px;
+    background: var(--bg-reader-pane);
 }
 
 .reader-empty i {
@@ -615,9 +648,38 @@ body {
     border-color: rgba(239, 68, 68, 0.3);
 }
 
+/* External mail account delete button - solid red */
+.btn-submit.btn-danger-action {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    color: #ef4444;
+    min-width: auto;
+}
+
+.btn-submit.btn-danger-action:hover {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.45);
+    transform: translateY(-1px);
+}
+
+body.theme-white .btn-submit.btn-danger-action {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #dc2626;
+}
+
+body.theme-white .btn-submit.btn-danger-action:hover {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+}
+
 .reader-body {
     flex-grow: 1;
-    background: white; /* Iframe container takes white or custom */
+    background: var(--bg-reader-pane);
     height: 100%;
     position: relative;
 }
@@ -626,7 +688,7 @@ body {
     width: 100%;
     height: 100%;
     border: none;
-    background: white;
+    background: transparent;
 }
 
 /* --------------------------------------------------
@@ -694,7 +756,7 @@ body {
 }
 
 /* Glassmorphism Cards */
-.auth-card, .compose-card, .admin-card, .tags-card, .groups-card, .locked-card {
+.auth-card, .compose-card, .admin-card, .tags-card, .groups-card, .locked-card, .external-mail-card {
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
@@ -977,8 +1039,9 @@ body {
 
 /* Compose Card spec */
 .compose-card {
-    width: 600px;
-    height: 500px;
+    width: 800px;
+    height: 650px;
+    max-height: 85vh;
 }
 
 .compose-header, .admin-header {
@@ -4068,6 +4131,8 @@ body.theme-white .btn-close-modal:hover {
     overflow-y: auto !important;
     width: 100% !important;
     height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
 }
 
 .mail-list-table {
@@ -4075,6 +4140,7 @@ body.theme-white .btn-close-modal:hover {
     border-collapse: collapse;
     table-layout: fixed;
     font-size: 13px;
+    align-self: stretch;
 }
 
 .mail-list-table th,
@@ -4091,7 +4157,7 @@ body.theme-white .btn-close-modal:hover {
     position: sticky;
     top: 0;
     z-index: 10;
-    background: var(--bg-pane-header, var(--bg-list-pane));
+    background: var(--bg-surface-solid) !important;
     border-bottom: 2px solid var(--border-color) !important;
     padding: 12px 8px;
     font-weight: 600;
@@ -4127,6 +4193,50 @@ body.theme-white .btn-close-modal:hover {
     width: 32px !important;
     min-width: 32px !important;
     max-width: 32px !important;
+}
+
+/* 제목행 즐겨찾기 필터 버튼: col-flag와 x좌표 정렬을 위해 padding-left로 보정 */
+.mail-list-table thead th.col-starred-filter {
+    text-align: center !important;
+    padding-left: 7px !important;
+    padding-right: 0 !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+}
+
+.col-starred-filter {
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    padding-left: 7px !important; /* tbody td:first-child의 4px border-left + 추가 3px 보정 */
+    padding-right: 0 !important;
+    text-align: center !important;
+}
+
+.flagged-filter-btn {
+    background: none !important;
+    border: none !important;
+    cursor: pointer !important;
+    color: var(--text-muted) !important;
+    font-size: 14px !important;
+    padding: 4px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 4px !important;
+    transition: transform 0.2s ease, color 0.2s ease, background 0.2s ease !important;
+}
+
+.flagged-filter-btn:hover {
+    transform: scale(1.15) !important;
+    color: var(--color-warning, #f59e0b) !important;
+}
+
+.flagged-filter-btn.active {
+    color: var(--color-warning, #f59e0b) !important;
+    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent) !important;
+    border-radius: 4px !important;
 }
 
 .mail-list-table thead th.col-filler {
@@ -4182,7 +4292,7 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .mail-list-table tbody tr.mail-item.selected td:first-child {
-    border-left-color: var(--color-primary) !important;
+    border-left-color: var(--account-color, var(--color-primary)) !important;
 }
 
 .mail-list-table tbody tr.mail-item.unread {
@@ -4257,14 +4367,19 @@ body.theme-white .btn-close-modal:hover {
     color: var(--color-warning, #f59e0b) !important;
 }
 
-.unread-dot {
+.mail-status-icon {
     display: inline-block !important;
-    width: 7px !important;
-    height: 7px !important;
-    background-color: var(--color-primary) !important;
-    border-radius: 50% !important;
-    margin-right: 6px !important;
     vertical-align: middle !important;
+}
+
+.mail-icon-unread {
+    color: var(--account-color, var(--color-primary)) !important;
+    opacity: 1 !important;
+}
+
+.mail-icon-read {
+    color: var(--account-color, var(--color-primary)) !important;
+    opacity: 1 !important;
 }
 
 .mail-list-table input[type="checkbox"] {
@@ -4302,7 +4417,7 @@ body.theme-white .btn-close-modal:hover {
 
 /* 7. Column resizer handles styling */
 .mail-list-table thead th {
-    position: relative !important;
+    position: sticky !important;
 }
 
 .col-resizer {
@@ -5184,4 +5299,385 @@ body.theme-white .custom-select-wrapper select:focus {
     border-color: var(--color-primary) !important;
     box-shadow: 0 0 0 3px var(--color-primary-glow) !important;
 }
+
+/* --------------------------------------------------
+ * EXTERNAL MAIL SETTINGS MODAL
+ * -------------------------------------------------- */
+.external-mail-card {
+    width: 600px !important;
+    max-height: 85vh;
+}
+.external-mail-body {
+    display: flex;
+    height: calc(100% - 53px);
+    overflow: hidden;
+}
+.external-mail-list-pane {
+    background: rgba(255, 255, 255, 0.01);
+}
+.external-mail-account-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+    user-select: none;
+}
+.external-mail-account-item:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+}
+.external-mail-account-item.active {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+}
+.external-mail-account-item.dragging {
+    opacity: 0.4;
+    border-style: dashed;
+}
+.external-mail-account-item.inactive {
+    opacity: 0.5;
+}
+.external-mail-account-item .service-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    width: 22px;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.external-mail-account-item .account-info {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+    gap: 2px;
+}
+.external-mail-account-item .account-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+.external-mail-account-item .account-email {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.external-mail-detail-pane .settings-form-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+}
+.external-mail-detail-pane label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.external-mail-detail-pane .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    position: relative;
+}
+.external-mail-detail-pane input, .external-mail-detail-pane select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    font-size: 13px;
+    outline: none;
+    transition: all var(--transition-fast);
+    width: 100%;
+    box-sizing: border-box;
+}
+.external-mail-detail-pane input:focus, .external-mail-detail-pane select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 10px var(--border-glow);
+}
+.external-mail-detail-pane input[readonly] {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.external-mail-detail-pane select option {
+    background-color: var(--bg-surface-solid);
+    color: var(--text-primary);
+}
+
+.input-grid-2x2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    width: 100%;
+}
+.input-grid-2x2 > * {
+    min-width: 0;
+}
+
+.color-palette-selector {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 8px;
+    margin-top: 4px;
+    width: 100%;
+}
+.color-palette-btn {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform var(--transition-fast);
+    box-sizing: border-box;
+}
+.color-palette-btn:hover {
+    transform: scale(1.15);
+}
+.color-palette-btn.selected {
+    border-color: #ffffff;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+    transform: scale(1.1);
+}
+
+.server-settings-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 12px;
+}
+.server-settings-grid > * {
+    min-width: 0;
+}
+
+/* Validation error styles */
+.external-mail-detail-pane input.validation-error,
+.external-mail-detail-pane select.validation-error {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25) !important;
+}
+.validation-error-balloon {
+    position: absolute;
+    top: 100%;
+    left: 12px;
+    background: #ef4444;
+    color: #ffffff;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 4px 10px rgba(239, 68, 68, 0.3);
+    pointer-events: none;
+    animation: fadeInUp 0.2s ease-out;
+}
+.validation-error-balloon::after {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 15px;
+    border: 5px solid transparent;
+    border-bottom-color: #ef4444;
+}
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 22px;
+}
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(255, 255, 255, 0.1);
+    transition: .3s;
+    border-radius: 22px;
+    border: 1px solid var(--border-color);
+}
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+}
+input:checked + .toggle-slider {
+    background-color: var(--color-primary);
+}
+input:checked + .toggle-slider:before {
+    transform: translateX(22px);
+}
+
+.btn-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 16px;
+}
+
+/* Unified Badge Colors in Mail List */
+.unified-mail-badge {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+/* White theme compatibility */
+body.theme-white .external-mail-account-item {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+body.theme-white .external-mail-account-item:hover {
+    background: #f1f5f9;
+}
+body.theme-white .external-mail-account-item.active {
+    background: #eff6ff;
+    border-color: #3b82f6;
+}
+body.theme-white .external-mail-detail-pane input,
+body.theme-white .external-mail-detail-pane select {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+body.theme-white .external-mail-detail-pane select option {
+    background-color: #ffffff;
+    color: #0f172a;
+}
+body.theme-white .toggle-slider {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+body.theme-white .external-mail-account-item .account-name {
+    color: #0f172a;
+}
+body.theme-white .external-mail-account-item .account-email {
+    color: #64748b;
+}
+body.theme-white .external-mail-detail-pane label {
+    color: #1e293b;
+}
+
+/* Sidebar Multi-account Styles */
+.sidebar-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    margin: 2px 0;
+    transition: background var(--transition-fast);
+    min-width: 0;
+}
+.sidebar-group-header:hover {
+    background: rgba(255,255,255,0.05);
+}
+.sidebar-group-header .group-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+}
+.sidebar-group-header .group-title .group-mail-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
+.sidebar-group-header .group-title .group-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    font-size: 13px;
+}
+.sidebar-group-header .group-arrow {
+    font-size: 11px;
+    flex-shrink: 0;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-left: 4px;
+}
+.sidebar-group-header.collapsed .group-arrow {
+    transform: rotate(-90deg);
+}
+
+/* Smooth accordion animation using grid-template-rows */
+.sidebar-group-submenu {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease,
+                margin 0.3s ease;
+    overflow: hidden;
+    opacity: 1;
+    margin-bottom: 4px;
+}
+.sidebar-group-submenu > .submenu-inner {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-left: 4px;
+}
+.sidebar-group-submenu.collapsed {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    margin-bottom: 0;
+}
+.sidebar-group-submenu .nav-item {
+    margin: 1px 4px !important;
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+}
+body.theme-white .sidebar-group-header {
+    color: #0f172a;
+}
+body.theme-white .sidebar-group-header:hover {
+    background: rgba(0,0,0,0.04);
+}
+
+
+
+
 
