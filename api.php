@@ -53,6 +53,13 @@ try {
     // Ignore error if column already exists
 }
 
+// Alter table to add theme column if not exists
+try {
+    $db->exec("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'violet'");
+} catch (PDOException $e) {
+    // Ignore error if column already exists
+}
+
 // Alter table to add profile_pic column if not exists
 try {
     $db->exec("ALTER TABLE users ADD COLUMN profile_pic TEXT");
@@ -599,7 +606,8 @@ switch ($action) {
                     'username' => $_SESSION['username'],
                     'name' => $_SESSION['name'],
                     'role' => $_SESSION['role'],
-                    'profile_pic' => $user['profile_pic'] ?? null
+                    'profile_pic' => $user['profile_pic'] ?? null,
+                    'theme' => $user['theme'] ?? 'violet'
                 ]
             ]);
         } else {
@@ -662,7 +670,8 @@ switch ($action) {
                 'username' => $user['username'],
                 'name' => $user['name'],
                 'role' => $user['role'],
-                'profile_pic' => $user['profile_pic'] ?? null
+                'profile_pic' => $user['profile_pic'] ?? null,
+                'theme' => $user['theme'] ?? 'violet'
             ]
         ]);
         break;
@@ -1719,6 +1728,17 @@ switch ($action) {
         respond(true, '개인 설정이 성공적으로 저장되었습니다.', [
             'profile_pic' => $profile_pic
         ]);
+        break;
+
+    case 'update_theme':
+        check_auth();
+        $username = $_SESSION['username'];
+        $theme = trim($_POST['theme'] ?? 'violet');
+        
+        $stmt = $db->prepare("UPDATE users SET theme = :theme WHERE username = :username");
+        $stmt->execute([':theme' => $theme, ':username' => $username]);
+        
+        respond(true, '테마가 저장되었습니다.');
         break;
 
     case 'toggle_flag':

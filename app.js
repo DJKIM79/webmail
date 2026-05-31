@@ -215,9 +215,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 'groups-modal',                           // z-index 210
                 'filters-modal',                          // z-index 200
                 'tags-modal',                             // z-index 200
+                'admin-create-user-modal',                 // z-index 140
+                'admin-modal',                            // z-index 130
                 'settings-modal',                         // z-index 120
-                'admin-create-user-modal',                 // z-index 110
-                'compose-modal', 'admin-modal', 'auth-modal', 'locked-modal' // z-index 100
+                'compose-modal', 'auth-modal', 'locked-modal' // z-index 100
             ];
             
             for (const id of overlays) {
@@ -525,10 +526,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function initApp() {
         // Load and apply theme
         let savedTheme = localStorage.getItem('mail-theme') || 'violet';
-        if (savedTheme === 'black') {
-            savedTheme = 'white';
-            localStorage.setItem('mail-theme', 'white');
-        }
         applyTheme(savedTheme);
 
         formLoadTimeInput.value = Math.floor(Date.now() / 1000).toString();
@@ -542,6 +539,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function loginUser(user) {
         state.user = user;
+        if (user.theme) {
+            localStorage.setItem('mail-theme', user.theme);
+            applyTheme(user.theme);
+        }
         profileName.textContent = user.name;
         profileEmail.textContent = `${user.username}@onto.kr`;
         
@@ -1293,10 +1294,24 @@ document.addEventListener('DOMContentLoaded', () => {
             doc.open();
             
             // Requirements 3.1: 다크 테마 배경 투명 및 글자색 연동
+            let bodyBg = '#161621'; // Solid dark theme bg
+            let bodyColor = '#f3f4f6';
+            let linkColor = '#c084fc';
+            
             const isWhiteTheme = document.body.classList.contains('theme-white');
-            const bodyBg = isWhiteTheme ? '#ffffff' : '#161621'; // Solid dark theme bg
-            const bodyColor = isWhiteTheme ? '#333333' : '#f3f4f6';
-            const linkColor = isWhiteTheme ? '#4f46e5' : '#c084fc';
+            if (isWhiteTheme) {
+                bodyBg = '#ffffff';
+                bodyColor = '#333333';
+                linkColor = '#4f46e5';
+            } else if (document.body.classList.contains('theme-gray')) {
+                bodyBg = '#18181b'; // zinc-900
+                bodyColor = '#f4f4f5'; // zinc-100
+                linkColor = '#cbd5e1'; // zinc-300
+            } else if (document.body.classList.contains('theme-black')) {
+                bodyBg = '#000000';
+                bodyColor = '#e2e8f0';
+                linkColor = '#ffffff';
+            }
             
             // Generate theme override CSS if dark mode is active
             const themeOverrideCss = !isWhiteTheme ? `
@@ -2659,6 +2674,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const selectedTheme = btn.dataset.theme;
                 applyTheme(selectedTheme);
                 localStorage.setItem('mail-theme', selectedTheme);
+                apiRequest('update_theme', 'POST', { theme: selectedTheme });
                 
                 // Update active states
                 settingsModal.querySelectorAll('.theme-btn').forEach(b => {

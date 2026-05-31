@@ -87,11 +87,6 @@
                             <span id="profile-email" class="email">user@onto.kr</span>
                         </div>
                     </div>
-                    <div class="user-actions">
-                        <button id="btn-admin" class="btn-icon-footer hidden" title="관리자 메뉴">
-                            <i class="fa-solid fa-user-gear"></i>
-                        </button>
-                    </div>
                 </div>
             </div>
         </aside>
@@ -540,26 +535,27 @@
 
                 <div class="form-group-filter">
                     <label for="filter-action" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">3. 실행할 작업</label>
-                    <select id="filter-action" name="action_val" required
-                            style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); color: var(--text-primary); outline: none; margin-bottom: 10px;">
-                        <option value="delete">삭제 (휴지통)</option>
-                        <option value="move">이동 (보관함)</option>
-                        <option value="copy">복사 (보관함)</option>
-                        <option value="star">즐겨찾기</option>
-                    </select>
+                    <div class="custom-select-wrapper" style="margin-bottom: 10px;">
+                        <select id="filter-action" name="action_val" required>
+                            <option value="delete">삭제 (휴지통)</option>
+                            <option value="move">이동 (보관함)</option>
+                            <option value="copy">복사 (보관함)</option>
+                            <option value="star">즐겨찾기</option>
+                        </select>
+                    </div>
 
                     <div id="filter-dest-folder-container" class="hidden">
                         <label for="filter-dest-folder" id="lbl-filter-dest-folder" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary); font-size: 13px;">이동/복사할 폴더 선택</label>
-                        <select id="filter-dest-folder" name="dest_folder"
-                                style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); color: var(--text-primary); outline: none;">
-                            <!-- Dynamic folder list options -->
-                        </select>
+                        <div class="custom-select-wrapper">
+                            <select id="filter-dest-folder" name="dest_folder">
+                                <!-- Dynamic folder list options -->
+                            </select>
+                        </div>
                     </div>
                 </div>
 
                 <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
-                    <button type="submit" id="btn-submit-filter" class="btn-submit" 
-                            style="padding: 10px 15px; border-radius: 6px; border: none; background: var(--accent-color, #3b82f6); color: white; cursor: pointer; font-weight: bold;">추가</button>
+                    <button type="submit" id="btn-submit-filter" class="btn-submit">추가</button>
                 </div>
             </form>
         </div>
@@ -637,6 +633,9 @@
             <div class="settings-header">
                 <h3><i class="fa-solid fa-gear"></i> 개인 설정</h3>
                 <div class="settings-header-actions">
+                    <button type="button" id="btn-admin" class="btn-icon-settings hidden" title="회원 관리">
+                        <i class="fa-solid fa-user-gear"></i>
+                    </button>
                     <button type="button" id="btn-manage-filters" class="btn-icon-settings" title="메일 필터링">
                         <i class="fa-solid fa-filter"></i>
                     </button>
@@ -708,6 +707,7 @@
                         <button type="button" class="theme-btn indigo" data-theme="indigo" title="남색"></button>
                         <button type="button" class="theme-btn violet" data-theme="violet" title="보라색"></button>
                         <button type="button" class="theme-btn white" data-theme="white" title="흰색"></button>
+                        <button type="button" class="theme-btn gray" data-theme="gray" title="회색"></button>
                         <button type="button" class="theme-btn black" data-theme="black" title="검정"></button>
                     </div>
                 </div>

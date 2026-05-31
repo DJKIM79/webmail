@@ -648,16 +648,20 @@ body {
     transition: opacity var(--transition-normal);
 }
 
-.auth-overlay, .compose-overlay, .admin-overlay, .locked-overlay {
+.auth-overlay, .compose-overlay, .locked-overlay {
     z-index: 100;
-}
-
-.admin-create-overlay {
-    z-index: 110;
 }
 
 .settings-overlay {
     z-index: 120;
+}
+
+.admin-overlay {
+    z-index: 130;
+}
+
+.admin-create-overlay {
+    z-index: 140;
 }
 
 .tags-overlay {
@@ -1433,6 +1437,16 @@ body {
     height: 44px !important;
 }
 
+.sidebar.collapsed .nav-item.active,
+.sidebar.collapsed .tag-item.active {
+    background: var(--color-primary-glow) !important;
+}
+
+.sidebar.collapsed .nav-item.active i,
+.sidebar.collapsed .tag-item.active i {
+    color: var(--color-primary) !important;
+}
+
 .sidebar.collapsed .sidebar-footer {
     align-items: flex-start !important;
     padding-top: 20px !important; /* 펼쳐졌을 때(20px)와 패딩 두께를 일치시켜 세로축 튐 제거 */
@@ -1562,7 +1576,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 110;
+    z-index: 140;
     opacity: 1;
     transition: opacity var(--transition-normal);
 }
@@ -1920,6 +1934,8 @@ body {
 .theme-color-btn.indigo { background: #6366f1; }
 .theme-color-btn.violet { background: #8b5cf6; }
 .theme-color-btn.white { background: #ffffff; border: 1px solid rgba(0, 0, 0, 0.15); }
+.theme-color-btn.gray { background: #71717a; border: 1px solid rgba(255, 255, 255, 0.15); }
+.theme-color-btn.black { background: #000000; border: 1px solid rgba(255, 255, 255, 0.15); }
 
 /* Theme Color Overrides on Body */
 body.theme-red {
@@ -2019,6 +2035,33 @@ body.theme-black {
     --mesh-color-2: rgba(113, 128, 150, 0.04);
     --mesh-color-3: rgba(74, 85, 104, 0.04);
 }
+body.theme-gray {
+    --color-primary: #e4e4e7; /* zinc-200 */
+    --color-primary-glow: rgba(228, 228, 231, 0.15);
+    --border-glow: rgba(228, 228, 231, 0.1);
+    --color-primary-text: #18181b; /* zinc-900 */
+    --color-primary-hover: #f4f4f5;
+
+    --bg-base: #27272a; /* zinc-800 */
+    --bg-surface: rgba(63, 63, 70, 0.7); /* zinc-700 with opacity */
+    --bg-surface-solid: #3f3f46; /* zinc-700 */
+    --bg-sidebar: rgba(39, 39, 42, 0.85); /* zinc-800 with opacity */
+    --bg-list-pane: rgba(63, 63, 70, 0.35);
+    --bg-reader-pane: rgba(24, 24, 27, 0.4); /* zinc-900 with opacity */
+    --bg-pane-header: rgba(39, 39, 42, 0.5);
+    --border-color: rgba(255, 255, 255, 0.07);
+
+    --text-primary: #f4f4f5; /* zinc-100 */
+    --text-secondary: #a1a1aa; /* zinc-400 */
+    --text-muted: #71717a; /* zinc-500 */
+
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --bg-active: rgba(255, 255, 255, 0.08);
+
+    --mesh-color-1: rgba(161, 161, 170, 0.08);
+    --mesh-color-2: rgba(113, 113, 122, 0.05);
+    --mesh-color-3: rgba(82, 82, 91, 0.04);
+}
 body.theme-white {
     --color-primary: #000000;
     --color-primary-glow: rgba(0, 0, 0, 0.08);
@@ -2026,25 +2069,25 @@ body.theme-white {
     --color-primary-text: #ffffff;
     --color-primary-hover: #1e293b;
     
-    --bg-base: #f8fafc;
+    --bg-base: #ffffff;
     --bg-surface: #ffffff;
     --bg-surface-solid: #ffffff;
-    --bg-sidebar: #f1f5f9;
+    --bg-sidebar: #fafafa;
     --bg-list-pane: #ffffff;
-    --bg-reader-pane: #f8fafc;
+    --bg-reader-pane: #ffffff;
     --bg-pane-header: #ffffff;
-    --border-color: #e2e8f0;
+    --border-color: #eaeaea;
     
     --text-primary: #0f172a;
     --text-secondary: #475569;
     --text-muted: #94a3b8;
     
-    --bg-hover: #f1f5f9;
-    --bg-active: #e2e8f0;
+    --bg-hover: #f4f4f5;
+    --bg-active: #e4e4e7;
     
-    --mesh-color-1: rgba(79, 70, 229, 0.05);
-    --mesh-color-2: rgba(236, 72, 153, 0.03);
-    --mesh-color-3: rgba(59, 130, 246, 0.03);
+    --mesh-color-1: rgba(0, 0, 0, 0.01);
+    --mesh-color-2: rgba(0, 0, 0, 0.01);
+    --mesh-color-3: rgba(0, 0, 0, 0.01);
 }
 
 /* 화이트 테마: 모달/테이블 오버라이드 */
@@ -2832,22 +2875,27 @@ body.theme-white .btn-close-modal:hover {
 
 .is-mobile-phone .sidebar {
     padding: 24px 12px !important; /* 좌우 패딩 축소 */
-    padding-bottom: 40px !important; /* 모바일 브라우저 하단 바 간섭 방지 */
+    padding-bottom: 20px !important; /* 아래로 더 내려주기 위해 패딩 축소 (기존 40px) */
 }
 
 .is-mobile-phone .sidebar.collapsed {
     width: 68px !important; /* 패딩 축소에 맞춰 전체 너비도 축소 */
     padding: 24px 12px !important;
-    padding-bottom: 40px !important;
+    padding-bottom: 20px !important; /* 아래로 더 내려주기 위해 패딩 축소 (기존 40px) */
 }
 
 .is-mobile-phone .sidebar.collapsed .logo,
-.is-mobile-phone .sidebar.collapsed .btn-compose,
 .is-mobile-phone .sidebar.collapsed .user-profile,
 .is-mobile-phone .sidebar.collapsed .nav-item {
     justify-content: center !important;
     width: 44px !important;
     margin: 0 auto !important;
+}
+
+.is-mobile-phone .sidebar.collapsed .btn-compose {
+    justify-content: center !important;
+    width: 44px !important;
+    margin: 0 auto 32px auto !important; /* PC 판처럼 여백 공간을 조절 (margin-bottom: 32px) */
 }
 
 .is-mobile-phone .sidebar.collapsed .user-actions {
@@ -3177,21 +3225,16 @@ body.theme-white .btn-close-modal:hover {
     display: none !important;
 }
 
-.btn-admin-add-user-icon {
-    background: var(--color-success) !important;
-}
-.btn-admin-add-user-icon:hover {
-    background: #059669 !important;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important;
-    transform: translateY(-1px) !important;
-}
-
+.btn-admin-add-user-icon,
 .btn-admin-groups-icon {
     background: var(--color-primary) !important;
     color: var(--color-primary-text) !important;
 }
+.btn-admin-add-user-icon:hover,
 .btn-admin-groups-icon:hover {
     background: var(--color-primary-hover) !important;
+    box-shadow: 0 4px 12px var(--color-primary-glow) !important;
+    transform: translateY(-1px) !important;
 }
 .tags-header {
     display: flex;
@@ -3437,6 +3480,7 @@ body.theme-white .btn-close-modal:hover {
 .theme-btn.indigo { background: #6366f1; }
 .theme-btn.violet { background: #8b5cf6; }
 .theme-btn.white { background: #ffffff; border: 1px solid rgba(0, 0, 0, 0.15); }
+.theme-btn.gray { background: #71717a; border: 1px solid rgba(255, 255, 255, 0.15); }
 .theme-btn.black { background: #000000; border: 1px solid rgba(255, 255, 255, 0.15); }
 
 /* --------------------------------------------------
@@ -5045,5 +5089,72 @@ body.theme-white .btn-filter-action-delete {
 body.theme-white .btn-filter-action-delete:hover {
     background: #dc2626 !important;
     color: #ffffff !important;
+}
+
+/* Stylish Custom Select Dropdown */
+.custom-select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.custom-select-wrapper select {
+    width: 100%;
+    padding: 10px 36px 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 6px);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    transition: all var(--transition-fast);
+}
+
+.custom-select-wrapper select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background-color: var(--bg-hover);
+}
+
+.custom-select-wrapper select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 10px var(--border-glow);
+}
+
+.custom-select-wrapper::after {
+    content: '\f0d7'; /* fontawesome caret-down */
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    pointer-events: none;
+    font-size: 13px;
+    transition: color var(--transition-fast);
+}
+
+.custom-select-wrapper:hover::after {
+    color: var(--text-primary);
+}
+
+.custom-select-wrapper select option {
+    background-color: var(--bg-surface-solid);
+    color: var(--text-primary);
+}
+
+body.theme-white .custom-select-wrapper select {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+}
+
+body.theme-white .custom-select-wrapper select:focus {
+    border-color: var(--color-primary) !important;
+    box-shadow: 0 0 0 3px var(--color-primary-glow) !important;
 }
 
