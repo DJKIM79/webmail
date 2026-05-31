@@ -5396,66 +5396,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     e.preventDefault();
                     e.stopPropagation();
                     
-                    // Special case for date column: toggle position with filler
-                    if (colName === 'date') {
-                        const fillerTh = table.querySelector('thead th.col-filler');
-                        const dateTh = th;
-                        if (fillerTh && dateTh) {
-                            const isFillerAfter = (dateTh.compareDocumentPosition(fillerTh) & Node.DOCUMENT_POSITION_FOLLOWING);
-                            
-                            // Animation logic
-                            const dateCells = Array.from(table.querySelectorAll(`.col-date`));
-                            const fillerCells = Array.from(table.querySelectorAll(`.col-filler`));
-                            
-                            const dateRects = dateCells.map(el => el.getBoundingClientRect());
-                            const fillerRects = fillerCells.map(el => el.getBoundingClientRect());
-                            
-                            if (isFillerAfter) {
-                                // Move date to the absolute right end (after filler)
-                                dateTh.parentNode.appendChild(dateTh);
-                                const rows = table.querySelectorAll('tbody tr');
-                                rows.forEach(tr => {
-                                    const dateTd = tr.querySelector('.col-date');
-                                    if (dateTd) tr.appendChild(dateTd);
-                                });
-                            } else {
-                                // Move filler back to the end (restore original layout)
-                                fillerTh.parentNode.appendChild(fillerTh);
-                                const rows = table.querySelectorAll('tbody tr');
-                                rows.forEach(tr => {
-                                    const fillerTd = tr.querySelector('.col-filler');
-                                    if (fillerTd) tr.appendChild(fillerTd);
-                                });
-                            }
-                            
-                            // Apply FLIP: Invert and Play
-                            dateCells.forEach((el, i) => {
-                                const newRect = el.getBoundingClientRect();
-                                const deltaX = dateRects[i].left - newRect.left;
-                                el.style.transition = 'none';
-                                el.style.transform = `translateX(${deltaX}px)`;
-                                requestAnimationFrame(() => {
-                                    el.style.transition = '';
-                                    el.style.transform = '';
-                                });
-                            });
-                            
-                            fillerCells.forEach((el, i) => {
-                                const newRect = el.getBoundingClientRect();
-                                const deltaX = fillerRects[i].left - newRect.left;
-                                el.style.transition = 'none';
-                                el.style.transform = `translateX(${deltaX}px)`;
-                                requestAnimationFrame(() => {
-                                    el.style.transition = '';
-                                    el.style.transform = '';
-                                });
-                            });
-                            
-                            updateTableMinWidth();
-                            return;
-                        }
-                    }
-                    
                     // Browser-native auto-fit calculation with transition handling
                     const oldTableLayout = table.style.tableLayout;
                     const oldTableWidth = table.style.width;
