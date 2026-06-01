@@ -54,6 +54,11 @@
                     <span class="nav-label">임시 보관함</span>
                     <span class="badge" style="display:none;">0</span>
                 </a>
+                <a href="#" class="nav-item" data-folder="Spam">
+                    <i class="fa-solid fa-ban"></i>
+                    <span class="nav-label">스팸 메일함</span>
+                    <span class="badge" style="display:none;">0</span>
+                </a>
                 <a href="#" class="nav-item" data-folder="Trash">
                     <i class="fa-solid fa-trash-can"></i>
                     <span class="nav-label">휴지통</span>
@@ -280,7 +285,7 @@
                         <div class="email-tag-container" id="mail-to-container">
                             <input type="text" id="mail-to-input" name="to" placeholder="받은 사람의 이메일 주소를 입력하세요." style="flex-grow: 1; height: 26px; box-sizing: border-box;">
                         </div>
-                        <button type="button" id="btn-addressbook-popup" title="주소록 선택" style="padding: 4px 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; white-space: nowrap; width: 30px; height: 30px; box-sizing: border-box;">
+                        <button type="button" id="btn-addressbook-popup" tabindex="-1" title="주소록 선택" style="padding: 4px 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; white-space: nowrap; width: 30px; height: 30px; box-sizing: border-box;">
                             <i class="fa-solid fa-address-book"></i>
                         </button>
                         <div id="autocomplete-list" class="autocomplete-items hidden" style="position: absolute; top: 32px; left: 0; width: 320px; max-width: 100%; background: var(--bg-surface-solid); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
@@ -1037,7 +1042,7 @@
 
     <!-- ADDRESS BOOK MODAL -->
     <div id="addressbook-modal" class="tags-overlay hidden" style="z-index: 200;">
-        <div class="tags-card" style="width: 455px; max-height: 85vh; height: 600px; display: flex; flex-direction: column;">
+        <div class="tags-card" style="width: 500px; max-height: 85vh; height: 600px; display: flex; flex-direction: column;">
             <div class="tags-header" style="flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border-color);">
                 <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;"><i class="fa-solid fa-address-book"></i> 주소록</h3>
                 <div style="display: flex; gap: 8px; align-items: center;">
@@ -1051,7 +1056,7 @@
             <!-- 주소록 탭 (카테고리 2개) -->
             <div class="addressbook-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); flex-shrink: 0; background: var(--bg-secondary);">
                 <button type="button" class="addr-tab-btn active" data-tab="my" style="flex: 1; padding: 12px; background: none; border: none; border-bottom: 2px solid var(--color-primary); color: var(--text-primary); font-weight: bold; cursor: pointer; text-align: center; font-size: 14px;">내 주소록</button>
-                <button type="button" class="addr-tab-btn" data-tab="received" style="flex: 1; padding: 12px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); cursor: pointer; text-align: center; font-size: 14px;">보낸 사람</button>
+                <button type="button" class="addr-tab-btn" data-tab="received" style="flex: 1; padding: 12px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); cursor: pointer; text-align: center; font-size: 14px;">미등록</button>
             </div>
 
             <!-- 주소록 상단 액션 바 -->

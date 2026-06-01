@@ -178,6 +178,17 @@ try {
     $db->exec("UPDATE users SET group_name = '관리자', role = 'admin' WHERE username = 'dj'");
 } catch (Exception $e) {}
 
+// Create table auto_senders
+try {
+    $db->exec("CREATE TABLE IF NOT EXISTS auto_senders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        name TEXT,
+        email TEXT NOT NULL,
+        UNIQUE(username, email)
+    )");
+} catch (Exception $e) {}
+
 // Create table address_book
 try {
     $db->exec("CREATE TABLE IF NOT EXISTS address_book (
@@ -716,9 +727,43 @@ function apply_mail_filters(string $username, PDO $db): void {
 
 
 $action = $_GET['action'] ?? '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $action = $_POST['action'];
+}
 
 switch ($action) {
-    case 'get_status':
+    case 'delete_auto_sender':
+        check_auth();
+        $username = $_SESSION['username'];
+        $email = trim($_POST['email'] ?? '');
+        if ($email) {
+            $stmt = $db->prepare("DELETE FROM auto_senders WHERE username = :username AND email = :email");
+            $stmt->execute([':username' => $username, ':email' => $email]);
+            respond(true, '삭제되었습니다.');
+        }
+        respond(false, '이메일 정보가 없습니다.');
+        break;
+
+    case 'mark_as_spam':
+        check_auth();
+        $username = $_SESSION['username'];
+        $email = trim($_POST['email'] ?? '');
+        if ($email) {
+            // Add spam filter
+            $stmt = $db->prepare("INSERT INTO mail_filters (username, filter_from, filter_subject, filter_body, keywords, action, dest_folder) VALUES (:username, 1, 0, 0, :keywords, 'move', 'Spam')");
+            $stmt->execute([
+                ':username' => $username,
+                ':keywords' => $email
+            ]);
+            
+            // Delete from auto_senders so they disappear from "Unregistered" tab
+            $stmt = $db->prepare("DELETE FROM auto_senders WHERE username = :username AND email = :email");
+            $stmt->execute([':username' => $username, ':email' => $email]);
+            
+            respond(true, '스팸으로 등록되었습니다.');
+        }
+        respond(false, '이메일 정보가 없습니다.');
+        break;    case 'get_status':
         if (isset($_SESSION['username'])) {
             $stmt = $db->prepare("SELECT * FROM users WHERE username = :username");
             $stmt->execute([':username' => $_SESSION['username']]);
@@ -897,14 +942,14 @@ switch ($action) {
                 if ($line === '' || $line === '.' || $line === '..') continue;
                 if ($line[0] === '.') {
                     $tag_name = substr($line, 1);
-                    if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts'], true)) {
+                    if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts', 'Spam'], true)) {
                         $tags[] = $tag_name;
                     }
                 }
             }
         }
         
-        $folders_to_check = array_merge(['INBOX', 'Sent', 'Drafts', 'Trash'], $tags);
+        $folders_to_check = array_merge(['INBOX', 'Sent', 'Drafts', 'Spam', 'Trash'], $tags);
         
         $local_inbox_unread = 0;
         $starred_unread = 0;
@@ -1100,7 +1145,7 @@ switch ($action) {
         }
 
         // Standard folder check
-        if (!in_array($folder, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Starred'], true) && !preg_match('/^[a-zA-Z0-9_\-\x{ac00}-\x{d7a3}\x{3130}-\x{318f}]+$/u', $folder)) {
+        if (!in_array($folder, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam', 'Starred'], true) && !preg_match('/^[a-zA-Z0-9_\-\x{ac00}-\x{d7a3}\x{3130}-\x{318f}]+$/u', $folder)) {
             respond(false, '잘못된 폴더입니다.');
         }
         
@@ -1116,14 +1161,14 @@ switch ($action) {
                     if ($line === '' || $line === '.' || $line === '..') continue;
                     if ($line[0] === '.') {
                         $tag_name = substr($line, 1);
-                        if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts'], true)) {
+                        if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts', 'Spam'], true)) {
                             $tags[] = $tag_name;
                         }
                     }
                 }
             }
             
-            $all_folders = array_merge(['INBOX', 'Sent', 'Drafts', 'Trash'], $tags);
+            $all_folders = array_merge(['INBOX', 'Sent', 'Drafts', 'Spam', 'Trash'], $tags);
             foreach ($all_folders as $f) {
                 $sub_paths = ($f === 'INBOX') ? ['new', 'cur'] : ['.' . $f . '/new', '.' . $f . '/cur'];
                 foreach ($sub_paths as $sub_path) {
@@ -1162,6 +1207,15 @@ switch ($action) {
             }
         }
         
+        // Save senders to auto_senders table
+        $auto_senders_to_save = [];
+        foreach ($emails as $em) {
+            if (!empty($em['from'])) {
+                $auto_senders_to_save[$em['from']] = true;
+            }
+        }
+        save_auto_senders_batch($username, $db, array_keys($auto_senders_to_save));
+
         usort($emails, fn($a, $b) => $b['timestamp'] - $a['timestamp']);
         respond(true, '성공', ['emails' => $emails]);
         break;
@@ -1301,7 +1355,8 @@ switch ($action) {
         $found_sub = $path_info['sub'];
         $email_id = $path_info['id'];
         
-        if ($folder === 'Trash') {
+        $is_trash = ($folder === 'Trash' || substr_compare($folder, '_Trash', -strlen('_Trash')) === 0);
+        if ($is_trash) {
             if (secure_delete_file($username, $found_sub, $email_id)) {
                 respond(true, '이메일이 영구 삭제되었습니다.');
             } else {
@@ -1325,6 +1380,12 @@ switch ($action) {
         $cc         = trim($_POST['cc'] ?? '');
         $is_html    = isset($_POST['is_html']) && $_POST['is_html'] == '1';
         $account_id = intval($_POST['account_id'] ?? 0);
+
+        // Store recipients into auto_senders immediately
+        $recipients_to_save = [];
+        if (!empty($to)) $recipients_to_save[] = $to;
+        if (!empty($cc)) $recipients_to_save[] = $cc;
+        save_auto_senders_batch($username, $db, $recipients_to_save);
 
         if (empty($to) || empty($subject) || empty($body)) {
             respond(false, '받는 이, 제목, 내용을 모두 입력해주세요.');
@@ -2131,7 +2192,7 @@ switch ($action) {
                 if ($line === '' || $line === '.' || $line === '..') continue;
                 if ($line[0] === '.') {
                     $tag_name = substr($line, 1);
-                    if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts'], true)) {
+                    if (!in_array($tag_name, ['Sent', 'Trash', 'Drafts', 'Spam'], true)) {
                         $tags[] = [
                             'name' => $tag_name,
                             'color' => $colors[$tag_name] ?? null,
@@ -2441,7 +2502,7 @@ switch ($action) {
             respond(false, '폴더 이름을 입력하세요.');
         }
         
-        if (in_array($tag_name, ['INBOX', 'Sent', 'Drafts', 'Trash'], true)) {
+        if (in_array($tag_name, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam'], true)) {
             respond(false, '기본 폴더는 삭제할 수 없습니다.');
         }
         
@@ -2967,6 +3028,35 @@ switch ($action) {
         break;
 }
 
+function save_auto_senders_batch(string $username, PDO $db, array $from_strings): void {
+    if (empty($from_strings)) return;
+    $db->beginTransaction();
+    $stmt = $db->prepare("INSERT OR IGNORE INTO auto_senders (username, name, email) VALUES (:username, :name, :email)");
+    foreach ($from_strings as $from_raw) {
+        $parts = str_getcsv($from_raw, ',', '"');
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if (empty($part)) continue;
+            if (preg_match('/^(.*?)<([^>]+)>/', $part, $matches)) {
+                $name = trim($matches[1], " '\"");
+                $email = trim($matches[2]);
+            } else {
+                $name = '';
+                $email = trim($part);
+            }
+            $email_lower = strtolower($email);
+            if (filter_var($email_lower, FILTER_VALIDATE_EMAIL)) {
+                $stmt->execute([
+                    ':username' => $username,
+                    ':name' => $name ? $name : '미정',
+                    ':email' => $email_lower
+                ]);
+            }
+        }
+    }
+    $db->commit();
+}
+
 function check_and_seed_address_groups(string $username, PDO $db): void {
     $stmt = $db->prepare("SELECT COUNT(*) FROM address_groups WHERE username = :username");
     $stmt->execute([':username' => $username]);
@@ -2983,12 +3073,7 @@ function get_received_senders(string $username, PDO $db): array {
     $senders = [];
     $sub_paths = ['new', 'cur'];
     
-    // 이미 등록된 주소록 목록을 가져옴 (제외하기 위함)
-    $stmt = $db->prepare("SELECT email FROM address_book WHERE username = :username");
-    $stmt->execute([':username' => $username]);
-    $existing_emails = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    $existing_emails_map = array_flip(array_map('strtolower', $existing_emails));
-
+    $strings_to_save = [];
     foreach ($sub_paths as $sub_path) {
         $files = secure_list_files($username, $sub_path);
         foreach ($files as $file) {
@@ -2997,31 +3082,36 @@ function get_received_senders(string $username, PDO $db): array {
                 $parts = explode("\n\n", str_replace("\r", "", $content), 2);
                 $header_raw = $parts[0] ?? '';
                 $headers = parse_headers($header_raw);
-                if (isset($headers['from'])) {
-                    $from = robust_decode_header($headers['from']);
-                    if (preg_match('/^(.*?)<([^>]+)>/', $from, $matches)) {
-                        $name = trim($matches[1]);
-                        $email = trim($matches[2]);
-                        $name = trim($name, " '\"");
-                    } else {
-                        $name = '';
-                        $email = trim($from);
-                    }
-                    
-                    $email_lower = strtolower($email);
-                    if (filter_var($email, FILTER_VALIDATE_EMAIL) && !isset($existing_emails_map[$email_lower])) {
-                        if (!isset($senders[$email_lower])) {
-                            $senders[$email_lower] = [
-                                'name' => $name ? $name : '미정',
-                                'email' => $email,
-                                'group_name' => '미정'
-                            ];
-                        }
-                    }
-                }
+                if (isset($headers['from'])) $strings_to_save[] = robust_decode_header($headers['from']);
+                if (isset($headers['to'])) $strings_to_save[] = robust_decode_header($headers['to']);
+                if (isset($headers['cc'])) $strings_to_save[] = robust_decode_header($headers['cc']);
             }
         }
     }
+    save_auto_senders_batch($username, $db, $strings_to_save);
+    
+    // Fetch all from auto_senders
+    $stmtAuto = $db->prepare("SELECT name, email FROM auto_senders WHERE username = :username");
+    $stmtAuto->execute([':username' => $username]);
+    $auto_list = $stmtAuto->fetchAll(PDO::FETCH_ASSOC);
+
+    // Filter out already registered ones
+    $stmt = $db->prepare("SELECT email FROM address_book WHERE username = :username");
+    $stmt->execute([':username' => $username]);
+    $existing_emails = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $existing_emails_map = array_flip(array_map('strtolower', $existing_emails));
+
+    foreach ($auto_list as $row) {
+        $email_lower = strtolower($row['email']);
+        if (!isset($existing_emails_map[$email_lower])) {
+            $senders[$email_lower] = [
+                'name' => $row['name'],
+                'email' => $row['email'],
+                'group_name' => '미정'
+            ];
+        }
+    }
+    
     return array_values($senders);
 }
 

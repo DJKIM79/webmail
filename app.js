@@ -279,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function syncActiveFolderUI() {
         const folder = state.currentFolder;
-        const isBuiltIn = ['INBOX', 'Starred', 'Sent', 'Drafts', 'Trash'].includes(folder);
+        const isBuiltIn = ['INBOX', 'Starred', 'Sent', 'Drafts', 'Spam', 'Trash'].includes(folder);
         
         if (!isBuiltIn && !folder.startsWith('ext_') && folder !== 'unified_inbox') {
             const sidebarTagsWrapper = document.getElementById('sidebar-tags-wrapper');
@@ -468,7 +468,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --------------------------------------------------
     // CUSTOM CONFIRM DIALOG
     // --------------------------------------------------
-    function customConfirm(message, iconClass = 'fa-solid fa-circle-question') {
+    function customConfirm(message, iconClass = 'fa-solid fa-circle-question', okText = '확인') {
         return new Promise((resolve) => {
             const backdrop = document.createElement('div');
             backdrop.className = 'confirm-overlay';
@@ -483,7 +483,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="confirm-footer">
                     <button type="button" class="btn-confirm-cancel">취소</button>
-                    <button type="button" class="btn-confirm-ok">확인</button>
+                    <button type="button" class="btn-confirm-ok">${okText}</button>
                 </div>
             `;
             
@@ -1012,6 +1012,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'Starred': return '<i class="fa-solid fa-star" style="color: var(--color-warning);"></i>';
             case 'Sent': return '<i class="fa-solid fa-paper-plane"></i>';
             case 'Drafts': return '<i class="fa-solid fa-file-signature"></i>';
+            case 'Spam': return '<i class="fa-solid fa-ban"></i>';
             case 'Trash': return '<i class="fa-solid fa-trash-can"></i>';
             default: return '<i class="fa-solid fa-folder-open"></i>';
         }
@@ -1032,6 +1033,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'INBOX': subLabel = '받은 편지함'; break;
                 case 'Sent': subLabel = '보낸 편지함'; break;
                 case 'Drafts': subLabel = '임시 보관함'; break;
+                case 'Spam': subLabel = '스팸 메일함'; break;
                 case 'Trash': subLabel = '휴지통'; break;
             }
             return `${subLabel} (${emailLabel})`;
@@ -1041,6 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'Starred': return '즐겨찾기';
             case 'Sent': return '보낸 편지함';
             case 'Drafts': return '임시 보관함';
+            case 'Spam': return '스팸 메일함';
             case 'Trash': return '휴지통';
             default: return folder;
         }
@@ -1302,7 +1305,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     let tagsSum = 0;
                     Object.keys(counts).forEach(key => {
                         // Sum up unread counts of folders that are not built-in and not external
-                        if (key !== 'INBOX' && key !== 'Sent' && key !== 'Drafts' && key !== 'Trash' && key !== 'unified_inbox' && !key.startsWith('ext_')) {
+                        if (key !== 'INBOX' && key !== 'Sent' && key !== 'Drafts' && key !== 'Spam' && key !== 'Trash' && key !== 'unified_inbox' && !key.startsWith('ext_')) {
                             tagsSum += counts[key];
                         }
                     });
@@ -1443,7 +1446,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
                     const accountLabel = emailAcc ? (emailAcc.service_type === 'onto' ? 'OnTo' : (emailAcc.service_type === 'naver' ? 'Naver' : (emailAcc.service_type === 'gmail' ? 'Gmail' : (emailAcc.service_type === 'daum' ? 'Daum' : (emailAcc.service_type === 'kakao' ? 'Kakao' : emailAcc.email))))) : '';
 
-                    const allDestinations = ['INBOX', 'Sent', 'Drafts', ...(resTags.tags || [])];
+                    const allDestinations = ['INBOX', 'Sent', 'Drafts', 'Spam', ...(resTags.tags || [])];
                     let addedCount = 0;
                     allDestinations.forEach(dest => {
                         let destName = '';
@@ -1604,6 +1607,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(() => {
                         mailBodyFrame.style.opacity = '1';
                     }, 50);
+
+                    try {
+                        const iframeDoc = mailBodyFrame.contentDocument || mailBodyFrame.contentWindow.document;
+                        iframeDoc.addEventListener('click', function(e) {
+                            const a = e.target.closest('a');
+                            if (a && a.href) {
+                                e.preventDefault();
+                                const url = a.href;
+                                if (url.startsWith('http://') || url.startsWith('https://')) {
+                                    customConfirm(`외부 링크로 이동하시겠습니까?\n\n${url}`, 'fa-solid fa-link', '진행').then(confirmed => {
+                                        if (confirmed) {
+                                            window.open(url, '_blank');
+                                        }
+                                    });
+                                } else if (url.startsWith('mailto:')) {
+                                    window.open(url, '_top');
+                                }
+                            }
+                        });
+                    } catch (err) {
+                        console.error('Cannot attach link listener to iframe:', err);
+                    }
                 };
 
                 // Render email body inside sandboxed iframe using srcdoc for modern browser support and security compliance
@@ -1682,12 +1707,9 @@ document.addEventListener('DOMContentLoaded', () => {
             actualFolder = emailInState.folder;
         }
 
-        const noConfirmDelete = (actualFolder === 'INBOX' || !['Sent', 'Drafts', 'Trash'].includes(actualFolder));
-        if (!noConfirmDelete) {
-            let msg = '이 메일을 삭제하시겠습니까?';
-            if (actualFolder === 'Trash') {
-                msg = '1개의 메일을 영구 삭제하시겠습니까?\n삭제된 이후에는 복구할 수 없습니다.';
-            }
+        const needsConfirm = actualFolder === 'Trash' || actualFolder.endsWith('_Trash');
+        if (needsConfirm) {
+            let msg = '1개의 메일을 영구 삭제하시겠습니까?\n삭제된 이후에는 복구할 수 없습니다.';
             if (!await customConfirm(msg, 'fa-solid fa-triangle-exclamation')) return;
         }
         
@@ -1796,6 +1818,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function initCustomToolbar(editor) {
         const toolbar = document.getElementById('custom-editor-toolbar');
         if (!toolbar) return;
+
+        // Skip toolbar buttons in tab sequence to allow Tab key to jump from Subject to Body directly
+        document.querySelectorAll('.custom-toolbar-container button, .custom-toolbar-container input, .custom-toolbar-container select').forEach(el => el.setAttribute('tabindex', '-1'));
 
         // Custom Toolbar horizontal scrolling with arrows
         const leftBtn = document.getElementById('custom-toolbar-nav-left');
@@ -3279,6 +3304,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         'INBOX': '받은 편지함',
                         'Sent': '보낸 편지함',
                         'Drafts': '임시 보관함',
+                        'Spam': '스팸 메일함',
                         'Trash': '휴지통'
                     };
                     return map[folderName] || folderName;
@@ -3480,6 +3506,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="nav-label">임시 보관함</span>
                     <span class="badge" style="display:none;">0</span>
                 </a>
+                <a href="#" class="nav-item" data-folder="Spam">
+                    <i class="fa-solid fa-ban"></i>
+                    <span class="nav-label">스팸 메일함</span>
+                    <span class="badge" style="display:none;">0</span>
+                </a>
                 <a href="#" class="nav-item" data-folder="Trash">
                     <i class="fa-solid fa-trash-can"></i>
                     <span class="nav-label">휴지통</span>
@@ -3556,6 +3587,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_Drafts">
                             <i class="fa-solid fa-file-signature"></i>
                             <span class="nav-label">임시 보관함</span>
+                            <span class="badge" style="display:none;">0</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Spam">
+                            <i class="fa-solid fa-ban"></i>
+                            <span class="nav-label">스팸 메일함</span>
                             <span class="badge" style="display:none;">0</span>
                         </a>
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_Trash">
@@ -5270,7 +5306,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                const dests = ['INBOX', 'Sent', 'Drafts', ...(resTags.tags || [])];
+                const dests = ['INBOX', 'Sent', 'Drafts', 'Spam', ...(resTags.tags || [])];
                 moveList.innerHTML = '';
                 let destCount = 0;
                 
@@ -5362,12 +5398,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const targets = getTargetEmails();
         if (targets.length === 0) return;
 
-        const noConfirmDelete = (state.currentFolder === 'INBOX' || !['Sent', 'Drafts', 'Trash'].includes(state.currentFolder));
-        if (!noConfirmDelete) {
-            let msg = `${targets.length}개의 메일을 삭제하시겠습니까?`;
-            if (state.currentFolder === 'Trash') {
-                msg = `${targets.length}개의 메일을 영구 삭제하시겠습니까?\n삭제된 이후에는 복구할 수 없습니다.`;
-            }
+        const needsConfirm = state.currentFolder === 'Trash' || state.currentFolder.endsWith('_Trash');
+        if (needsConfirm) {
+            let msg = `${targets.length}개의 메일을 영구 삭제하시겠습니까?\n삭제된 이후에는 복구할 수 없습니다.`;
             if (!await customConfirm(msg, 'fa-solid fa-triangle-exclamation')) return;
         }
 
@@ -5378,7 +5411,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.success) successCount++;
         }
 
-        showToast(`${successCount}개의 메일이 삭제되었습니다.`);
+        if (needsConfirm) {
+            showToast(`${successCount}개의 메일이 영구 삭제되었습니다.`);
+        } else {
+            showToast(`${successCount}개의 메일이 휴지통으로 이동하였습니다.`);
+        }
         loadEmails(state.currentFolder);
         readerEmpty.classList.remove('hidden');
         readerContent.classList.add('hidden');
@@ -5766,7 +5803,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <th style="padding: 8px; width: 80px;">이름</th>
                         <th style="padding: 8px;">이메일</th>
                         <th style="padding: 8px; width: 55px;">그룹</th>
-                        <th style="padding: 8px; width: 110px; text-align: right;"></th>
+                        <th style="padding: 8px; width: 150px; text-align: right;"></th>
                     </tr>
                 `;
             }
@@ -5910,7 +5947,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     tdAction.appendChild(btnDel);
                 } else {
-                    // 보낸 사람 목록에서는 편집(내 주소록 추가) 가능
+                    // 미등록 목록에서는 등록, 삭제, 스팸 가능
                     const btnEdit = document.createElement('button');
                     btnEdit.type = 'button';
                     btnEdit.className = 'btn-admin-action approve';
@@ -5921,6 +5958,60 @@ document.addEventListener('DOMContentLoaded', () => {
                         openAddressForm(item);
                     });
                     tdAction.appendChild(btnEdit);
+
+                    const btnDel = document.createElement('button');
+                    btnDel.type = 'button';
+                    btnDel.className = 'btn-admin-action delete';
+                    btnDel.style.margin = '0';
+                    btnDel.innerHTML = '<i class="fa-solid fa-trash"></i> 삭제';
+                    btnDel.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (await customConfirm(`'${item.email}' 목록에서 삭제하시겠습니까?`, 'fa-solid fa-triangle-exclamation')) {
+                            const formData = new FormData();
+                            formData.append('action', 'delete_auto_sender');
+                            formData.append('email', item.email);
+                            try {
+                                const res = await fetch('api.php', { method: 'POST', body: formData });
+                                const data = await res.json();
+                                if (data.success) {
+                                    showToast(data.message);
+                                    await loadAddressBook();
+                                } else {
+                                    showToast(data.message || '삭제 실패', true);
+                                }
+                            } catch (err) {
+                                showToast('오류 발생', true);
+                            }
+                        }
+                    });
+                    tdAction.appendChild(btnDel);
+
+                    const btnSpam = document.createElement('button');
+                    btnSpam.type = 'button';
+                    btnSpam.className = 'btn-admin-action reject';
+                    btnSpam.style.margin = '0';
+                    btnSpam.innerHTML = '<i class="fa-solid fa-ban"></i> 스팸';
+                    btnSpam.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (await customConfirm(`'${item.email}' 스팸으로 등록하시겠습니까?\n이후 해당 메일은 스팸함으로 이동됩니다.`, 'fa-solid fa-ban')) {
+                            const formData = new FormData();
+                            formData.append('action', 'mark_as_spam');
+                            formData.append('email', item.email);
+                            try {
+                                const res = await fetch('api.php', { method: 'POST', body: formData });
+                                const data = await res.json();
+                                if (data.success) {
+                                    showToast(data.message);
+                                    await loadAddressBook();
+                                } else {
+                                    showToast(data.message || '스팸 등록 실패', true);
+                                }
+                            } catch (err) {
+                                showToast('오류 발생', true);
+                            }
+                        }
+                    });
+                    tdAction.appendChild(btnSpam);
                 }
                 tr.appendChild(tdAction);
             }
