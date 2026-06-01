@@ -4514,6 +4514,128 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
                 
+                const quotaDaily = document.getElementById('mj-quota-daily');
+                const quotaMonthly = document.getElementById('mj-quota-monthly');
+                const quotaDaysLeft = document.getElementById('mj-quota-days-left');
+                const quotaContainer = document.getElementById('mj-quota-container');
+                let mjLoadingInterval = null;
+                
+                function updateDaysLeft() {
+                    if (!quotaDaysLeft) return;
+                    const now = new Date();
+                    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    const daysLeft = endOfMonth.getDate() - now.getDate();
+                    
+                    if (!quotaDaysLeft.dataset.loading) {
+                        quotaDaysLeft.textContent = `D-${daysLeft}`;
+                    }
+                    
+                    let color = 'var(--color-success, #10b981)'; // 0~5일 남음 (녹색)
+                    if (daysLeft >= 16) {
+                        color = '#8b5cf6'; // 16~30일 남음 (보라색)
+                    } else if (daysLeft >= 6) {
+                        color = '#3730a3'; // 6~15일 남음 (남색)
+                    }
+                    
+                    quotaDaysLeft.style.color = color;
+                    quotaDaysLeft.style.borderColor = color;
+                    quotaDaysLeft.style.backgroundColor = `color-mix(in srgb, ${color} 10%, transparent)`;
+                }
+                
+                function applyColorToBadge(el, used, limit) {
+                    if (!el) return;
+                    if (!el.dataset.loading) {
+                        el.textContent = `${used}/${limit}`;
+                    }
+                    
+                    const ratio = limit > 0 ? (used / limit) : 0;
+                    let color = 'var(--color-success, #10b981)';
+                    if (ratio >= 0.9) {
+                        color = 'var(--color-danger, #ef4444)';
+                    } else if (ratio >= 0.7) {
+                        color = 'var(--color-warning, #f59e0b)';
+                    }
+                    
+                    el.style.color = color;
+                    el.style.borderColor = color;
+                    el.style.backgroundColor = `color-mix(in srgb, ${color} 10%, transparent)`;
+                }
+
+                async function loadQuota(force = false) {
+                    updateDaysLeft();
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const cachedStr = localStorage.getItem('mj-quota-data');
+                    const cachedDate = localStorage.getItem('mj-quota-date');
+                    
+                    if (!force && cachedDate === todayStr && cachedStr) {
+                        try {
+                            const data = JSON.parse(cachedStr);
+                            applyColorToBadge(quotaDaily, data.today_used, data.today_limit);
+                            applyColorToBadge(quotaMonthly, data.month_used, data.month_limit);
+                            return;
+                        } catch (e) {}
+                    }
+                    
+                    // Start Loading Animation
+                    const badges = [quotaDaysLeft, quotaDaily, quotaMonthly].filter(Boolean);
+                    badges.forEach(el => {
+                        el.dataset.loading = 'true';
+                        el.textContent = '.';
+                    });
+                    
+                    if (mjLoadingInterval) clearInterval(mjLoadingInterval);
+                    let dotCount = 1;
+                    mjLoadingInterval = setInterval(() => {
+                        dotCount = (dotCount % 3) + 1;
+                        badges.forEach(el => { el.textContent = '.'.repeat(dotCount); });
+                    }, 300);
+                    
+                    try {
+                        const res = await fetch('api.php?action=get_mailjet_quota');
+                        const data = await res.json();
+                        
+                        clearInterval(mjLoadingInterval);
+                        badges.forEach(el => { delete el.dataset.loading; });
+                        
+                        if (data.success) {
+                            updateDaysLeft(); // recalculate D-day without loading flag
+                            applyColorToBadge(quotaDaily, data.today_used, data.today_limit);
+                            applyColorToBadge(quotaMonthly, data.month_used, data.month_limit);
+                            
+                            localStorage.setItem('mj-quota-data', JSON.stringify({
+                                today_used: data.today_used,
+                                today_limit: data.today_limit,
+                                month_used: data.month_used,
+                                month_limit: data.month_limit
+                            }));
+                            localStorage.setItem('mj-quota-date', todayStr);
+                        } else {
+                            if (quotaDaily) quotaDaily.textContent = '실패';
+                            if (quotaMonthly) quotaMonthly.textContent = '실패';
+                        }
+                    } catch (err) {
+                        clearInterval(mjLoadingInterval);
+                        badges.forEach(el => { delete el.dataset.loading; });
+                        if (quotaDaily) quotaDaily.textContent = '오류';
+                        if (quotaMonthly) quotaMonthly.textContent = '오류';
+                    }
+                }
+                
+                if (state.user && state.user.role === 'admin') {
+                    if (quotaContainer) quotaContainer.style.display = 'flex';
+                    loadQuota(false);
+                } else {
+                    if (quotaContainer) quotaContainer.style.display = 'none';
+                }
+                
+                if (quotaContainer && !quotaContainer.dataset.bound) {
+                    quotaContainer.dataset.bound = 'true';
+                    quotaContainer.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (quotaDaily && quotaDaily.dataset.loading) return; // Prevent double click
+                        loadQuota(true);
+                    });
+                }
                 settingsModal.classList.remove('hidden');
             }
         });

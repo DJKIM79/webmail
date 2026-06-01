@@ -888,8 +888,13 @@
         <div class="settings-card">
             <div class="settings-header">
                 <h3><i class="fa-solid fa-gear"></i> 개인 설정</h3>
-                <div class="settings-header-actions">
-                    <button type="button" id="btn-logout" class="btn-icon-settings btn-logout-settings" title="로그아웃">
+                <div class="settings-header-actions" style="display:flex; align-items:center; gap:10px;">
+                    <div id="mj-quota-container" style="display:none; align-items:center; gap:6px; cursor:pointer;" title="클릭하여 할당량 갱신">
+                        <div id="mj-quota-days-left" style="border:1px solid var(--border-color); padding:3px 8px; border-radius:6px; font-size:11px; font-weight:600; color:var(--text-secondary); transition:all 0.2s; min-width:35px; text-align:center;">...</div>
+                        <div id="mj-quota-daily" style="border:1px solid var(--border-color); padding:3px 8px; border-radius:6px; font-size:11px; font-weight:600; color:var(--text-secondary); transition:all 0.2s; min-width:40px; text-align:center;">...</div>
+                        <div id="mj-quota-monthly" style="border:1px solid var(--border-color); padding:3px 8px; border-radius:6px; font-size:11px; font-weight:600; color:var(--text-secondary); transition:all 0.2s; min-width:45px; text-align:center;">...</div>
+                    </div>
+                    <button type="button" id="btn-logout" class="btn-icon-settings btn-logout-settings" style="color:var(--color-primary);" title="로그아웃">
                         <span class="logout-icon-wrapper">
                             <span class="logout-bracket"></span>
                             <i class="fa-solid fa-arrow-right logout-arrow"></i>

@@ -732,6 +732,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 switch ($action) {
+    case 'get_mailjet_quota':
+        check_auth();
+        $MJ_KEY = '86ecb242beaa17746e9def290bd37d3b';
+        $MJ_SECRET = '90008ab57a485dcfd7c42d1b5214c28e';
+        
+        $today = gmdate('Y-m-d\T00:00:00\Z');
+        $month = gmdate('Y-m-01\T00:00:00\Z');
+        
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_USERPWD, $MJ_KEY . ':' . $MJ_SECRET);
+        
+        // Get today's count
+        curl_setopt($ch, CURLOPT_URL, "https://api.mailjet.com/v3/REST/message?Limit=1&FromTS={$today}");
+        $res_today = json_decode(curl_exec($ch), true);
+        $count_today = $res_today['Total'] ?? 0;
+        
+        // Get month's count
+        curl_setopt($ch, CURLOPT_URL, "https://api.mailjet.com/v3/REST/message?Limit=1&FromTS={$month}");
+        $res_month = json_decode(curl_exec($ch), true);
+        $count_month = $res_month['Total'] ?? 0;
+        
+        curl_close($ch);
+        
+        respond(true, 'success', [
+            'today_used' => $count_today,
+            'today_limit' => 200,
+            'month_used' => $count_month,
+            'month_limit' => 6000
+        ]);
+        break;
     case 'delete_auto_sender':
         check_auth();
         $username = $_SESSION['username'];
@@ -1932,7 +1963,15 @@ switch ($action) {
         }
         
         $new_group_name = implode(', ', $groups_array);
-        $stmt = $db->prepare("UPDATE users SET group_name = :group_name WHERE id = :id");
+        
+        // Sync role based on group membership (if '관리자' is present, set role = 'admin', else 'user')
+        $new_role = in_array('관리자', $groups_array, true) ? 'admin' : 'user';
+        
+        $stmt = $db->prepare("UPDATE users SET group_name = :group_name, role = :role WHERE id = :id AND username != 'dj'");
+        $stmt->execute([':group_name' => $new_group_name, ':role' => $new_role, ':id' => $id]);
+        
+        // Also update for 'dj' separately just in case they update dj's groups, to never lose admin role
+        $stmt = $db->prepare("UPDATE users SET group_name = :group_name WHERE id = :id AND username = 'dj'");
         $stmt->execute([':group_name' => $new_group_name, ':id' => $id]);
         
         respond(true, '회원의 그룹이 변경되었습니다.');
