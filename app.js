@@ -4549,7 +4549,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 function applyColorToBadge(el, used, limit) {
                     if (!el) return;
                     if (!el.dataset.loading) {
-                        el.textContent = `${used}/${limit}`;
+                        el.textContent = `${limit - used}`;
                     }
                     
                     const ratio = limit > 0 ? (used / limit) : 0;
