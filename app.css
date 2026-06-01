@@ -408,6 +408,15 @@ body {
     color: var(--color-primary);
 }
 
+.btn-refresh.error {
+    color: var(--color-danger);
+}
+
+.btn-refresh.error:hover {
+    color: var(--color-danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
 .mail-items-list {
     flex-grow: 1;
     overflow-y: auto;

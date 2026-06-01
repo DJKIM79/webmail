@@ -788,6 +788,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const startTime = Date.now();
         if (btnRefresh) {
             btnRefresh.classList.add('refreshing');
+            btnRefresh.classList.remove('error');
         }
 
         // Immediately reset selection and reader when switching folders
@@ -988,6 +989,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const tbody = mailContainer.querySelector('#mail-list-tbody');
             if (tbody && tbody.classList.contains('loading-fade')) {
                 tbody.classList.remove('loading-fade');
+            }
+            if (btnRefresh) {
+                btnRefresh.classList.add('error');
             }
         }
     }

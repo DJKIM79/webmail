@@ -20,6 +20,36 @@
         (function() {
             var theme = localStorage.getItem('mail-theme') || 'gray';
             document.body.classList.add('theme-' + theme);
+
+            function getCookie(name) {
+                var value = "; " + document.cookie;
+                var parts = value.split("; " + name + "=");
+                if (parts.length === 2) return parts.pop().split(";").shift();
+                return null;
+            }
+
+            var sidebarWidth = getCookie('sidebarWidth');
+            var listHeight = getCookie('listHeight');
+            var sidebarCollapsed = getCookie('sidebarCollapsed');
+            
+            var css = '';
+            var isMobilePhone = /Android.*Mobi|iPhone/i.test(navigator.userAgent);
+            
+            if (sidebarCollapsed === 'true' || (isMobilePhone && sidebarCollapsed === null)) {
+                css += '#sidebar { width: 92px; }\n';
+            } else if (sidebarWidth) {
+                css += '#sidebar { width: ' + sidebarWidth + 'px; }\n';
+            }
+            
+            if (listHeight) {
+                css += '#mail-list-pane { height: ' + listHeight + 'px; }\n';
+            }
+            
+            if (css) {
+                var style = document.createElement('style');
+                style.appendChild(document.createTextNode(css));
+                document.head.appendChild(style);
+            }
         })();
     </script>
     <div class="mesh-bg"></div>
