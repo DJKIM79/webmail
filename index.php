@@ -16,6 +16,12 @@
     <link rel="icon" type="image/x-icon" href="onto.ico">
 </head>
 <body>
+    <script>
+        (function() {
+            var theme = localStorage.getItem('mail-theme') || 'gray';
+            document.body.classList.add('theme-' + theme);
+        })();
+    </script>
     <div class="mesh-bg"></div>
 
     <!-- MAIN APP CONTAINER -->
