@@ -3884,7 +3884,7 @@ body.theme-white .btn-close-modal:hover {
     width: auto !important;
     border-radius: var(--radius-md) !important;
     padding: 0 !important;
-    overflow: hidden;
+    overflow: visible !important;
     flex-shrink: 0;
 }
 
@@ -3901,11 +3901,15 @@ body.theme-white .btn-close-modal:hover {
     align-items: center !important;
     justify-content: center !important;
     border: 2px solid transparent !important; /* 기본 상태: 투명 테두리 */
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast) !important;
 }
 
 .user-profile:hover .avatar {
     border-color: var(--color-primary) !important;
-    box-shadow: 0 0 8px var(--color-primary-glow) !important;
+    box-shadow: 0 0 2px var(--color-primary),
+                0 0 5px var(--color-primary-glow),
+                0 0 10px var(--border-glow),
+                inset 0 0 2px var(--color-primary-glow) !important;
     background: var(--bg-active) !important;
 }
 
@@ -5044,7 +5048,7 @@ body.theme-white .btn-close-modal:hover {
     justify-content: space-between !important;
     width: 100% !important;
     gap: 8px !important;
-    overflow: hidden; /* 프로필 뒤로 기어들어가는 버튼들의 넘침을 감춤 */
+    overflow: visible !important; /* 네온 효과가 짤리지 않도록 보임 설정 */
 }
 
 .user-profile {

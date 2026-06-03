@@ -549,8 +549,9 @@
             <div style="font-size: 14px; color: var(--text-primary); margin-bottom: 24px;">
                 메일 작성을 취소하면 작성 중인 내용도 삭제됩니다.
             </div>
-            <div style="display: flex; justify-content: flex-end;">
-                <button id="btn-compose-confirm-delete" class="btn-submit btn-danger-action" style="margin: 0; min-width: auto; padding: 8px 16px;">작성 취소</button>
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                <button id="btn-compose-confirm-cancel" class="btn-cancel" style="margin: 0; min-width: auto; padding: 8px 16px;">취소</button>
+                <button id="btn-compose-confirm-delete" class="btn-submit btn-danger-action" style="margin: 0; min-width: auto; padding: 8px 16px;">삭제</button>
             </div>
         </div>
     </div>

@@ -189,7 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 대상 모달들에 기능 적용
     setupClickOutside(authModal);
-    setupClickOutside(composeModal);
+    // setupClickOutside(composeModal); // 외부 영역을 클릭하면 안닫히게 설정
     setupClickOutside(adminModal);
     setupClickOutside(settingsModal);
     setupClickOutside(document.getElementById('tags-modal'));
@@ -2763,6 +2763,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (quillEditor) {
                 quillEditor.root.innerHTML = '';
             }
+        });
+    }
+    
+    const btnComposeConfirmCancel = document.getElementById('btn-compose-confirm-cancel');
+    if (btnComposeConfirmCancel) {
+        btnComposeConfirmCancel.addEventListener('click', () => {
+            document.getElementById('compose-confirm-modal').classList.add('hidden');
         });
     }
 
