@@ -138,6 +138,29 @@ try {
     // Ignore error if column already exists
 }
 
+// Create table cached_emails
+$db->exec("CREATE TABLE IF NOT EXISTS cached_emails (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    subject TEXT,
+    `from` TEXT,
+    `to` TEXT,
+    cc TEXT,
+    date TEXT,
+    timestamp INTEGER,
+    seen INTEGER DEFAULT 0,
+    flagged INTEGER DEFAULT 0,
+    snippet TEXT,
+    account_id INTEGER DEFAULT 0,
+    account_color TEXT,
+    account_email TEXT
+)");
+try {
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_cached_emails_username_folder ON cached_emails(username, folder)");
+} catch (Exception $e) {}
+
 // Create table mail_filters
 $db->exec("CREATE TABLE IF NOT EXISTS mail_filters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -306,6 +329,206 @@ function secure_write_file(string $username, string $folder, string $filename, s
         return $return_var === 0;
     }
     return false;
+}
+function sync_folder_cache(string $username, string $folder, PDO $db): void {
+    $sub_paths = ($folder === 'INBOX') ? ['new', 'cur'] : ['.' . $folder . '/new', '.' . $folder . '/cur'];
+    
+    // 1. Get current files in directories
+    $all_files = [];
+    $file_sub_paths = [];
+    foreach ($sub_paths as $sub_path) {
+        $files = secure_list_files($username, $sub_path);
+        foreach ($files as $file) {
+            $all_files[] = $file;
+            $file_sub_paths[$file] = $sub_path;
+        }
+    }
+    
+    // 2. Get currently cached emails for this folder
+    $stmt = $db->prepare("SELECT filename, id FROM cached_emails WHERE username = :username AND folder = :folder");
+    $stmt->execute([':username' => $username, ':folder' => $folder]);
+    $cached = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $cached_map = [];
+    foreach ($cached as $c) {
+        $cached_map[$c['filename']] = $c['id'];
+    }
+    
+    // 3. Compare to find deleted files
+    $files_in_dir = array_flip($all_files);
+    $to_delete = [];
+    foreach ($cached_map as $filename => $id) {
+        if (!isset($files_in_dir[$filename])) {
+            $to_delete[] = $id;
+        }
+    }
+    
+    if (!empty($to_delete)) {
+        $placeholders = implode(',', array_fill(0, count($to_delete), '?'));
+        $stmt = $db->prepare("DELETE FROM cached_emails WHERE id IN ($placeholders)");
+        $stmt->execute($to_delete);
+    }
+    
+    // 4. Find new files to cache (fast placeholder insertion based on filename flags)
+    $to_insert = [];
+    foreach ($all_files as $file) {
+        if (!isset($cached_map[$file])) {
+            $seen = 0;
+            $flagged = 0;
+            
+            $info_part = explode(':2,', $file);
+            if (isset($info_part[1])) {
+                if (strpos($info_part[1], 'S') !== false) {
+                    $seen = 1;
+                }
+                if (strpos($info_part[1], 'F') !== false) {
+                    $flagged = 1;
+                }
+            }
+            
+            $ts_parts = explode('.', $file);
+            $timestamp = is_numeric($ts_parts[0]) ? (int)$ts_parts[0] : time();
+            
+            $to_insert[] = [
+                'filename' => $file,
+                'seen' => $seen,
+                'flagged' => $flagged,
+                'timestamp' => $timestamp
+            ];
+        }
+    }
+    
+    if (!empty($to_insert)) {
+        $stmt = $db->prepare("INSERT OR REPLACE INTO cached_emails 
+            (id, username, folder, filename, subject, `from`, `to`, cc, date, timestamp, seen, flagged, snippet, account_id, account_color, account_email) 
+            VALUES (:id, :username, :folder, :filename, NULL, NULL, NULL, NULL, NULL, :timestamp, :seen, :flagged, NULL, 0, '#3b82f6', '')");
+        foreach ($to_insert as $em) {
+            $stmt->execute([
+                ':id' => $em['filename'],
+                ':username' => $username,
+                ':folder' => $folder,
+                ':filename' => $em['filename'],
+                ':timestamp' => $em['timestamp'],
+                ':seen' => $em['seen'],
+                ':flagged' => $em['flagged']
+            ]);
+        }
+    }
+}
+
+function get_emails_in_folder(string $username, string $folder, PDO $db): array {
+    sync_folder_cache($username, $folder, $db);
+    
+    // Resolve any placeholders that are missing headers
+    $stmt = $db->prepare("SELECT filename FROM cached_emails WHERE username = :username AND folder = :folder AND subject IS NULL");
+    $stmt->execute([':username' => $username, ':folder' => $folder]);
+    $placeholders = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    if (!empty($placeholders)) {
+        $sub_paths = ($folder === 'INBOX') ? ['new', 'cur'] : ['.' . $folder . '/new', '.' . $folder . '/cur'];
+        foreach ($placeholders as $file) {
+            $sub_path = (strpos($file, ':2,') !== false) ? 
+                (($folder === 'INBOX') ? 'cur' : '.' . $folder . '/cur') :
+                (($folder === 'INBOX') ? 'new' : '.' . $folder . '/new');
+                
+            $content = secure_read_file($username, $sub_path, $file);
+            if ($content) {
+                $header = parse_email_header_from_content($content, $file, $folder);
+                if ($header) {
+                    $stmtUpdate = $db->prepare("UPDATE cached_emails SET 
+                        subject = :subject, `from` = :from, `to` = :to, cc = :cc, date = :date, snippet = :snippet 
+                        WHERE id = :id");
+                    $stmtUpdate->execute([
+                        ':id' => $file,
+                        ':subject' => $header['subject'],
+                        ':from' => $header['from'],
+                        ':to' => $header['to'],
+                        ':cc' => $header['cc'],
+                        ':date' => $header['date'],
+                        ':snippet' => $header['snippet']
+                    ]);
+                }
+            }
+        }
+    }
+    
+    $stmt = $db->prepare("SELECT id, subject, `from`, `to`, cc, date, timestamp, seen, flagged, snippet, folder FROM cached_emails WHERE username = :username AND folder = :folder");
+    $stmt->execute([':username' => $username, ':folder' => $folder]);
+    $emails = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($emails as &$em) {
+        $em['seen'] = (int)$em['seen'];
+        $em['flagged'] = (int)$em['flagged'];
+    }
+    return $emails;
+}
+
+function get_emails_in_folder_paginated(string $username, string $folder, int $offset, int $limit, PDO $db): array {
+    sync_folder_cache($username, $folder, $db);
+    
+    // Fetch slice filenames first
+    $stmt = $db->prepare("SELECT filename, subject FROM cached_emails 
+                          WHERE username = :username AND folder = :folder 
+                          ORDER BY timestamp DESC, id DESC LIMIT :limit OFFSET :offset");
+    $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+    $stmt->bindValue(':folder', $folder, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $slice = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Resolve placeholders ONLY for this slice
+    $sub_paths = ($folder === 'INBOX') ? ['new', 'cur'] : ['.' . $folder . '/new', '.' . $folder . '/cur'];
+    foreach ($slice as $item) {
+        if ($item['subject'] === null) {
+            $file = $item['filename'];
+            $sub_path = (strpos($file, ':2,') !== false) ? 
+                (($folder === 'INBOX') ? 'cur' : '.' . $folder . '/cur') :
+                (($folder === 'INBOX') ? 'new' : '.' . $folder . '/new');
+                
+            $content = secure_read_file($username, $sub_path, $file);
+            if ($content) {
+                $header = parse_email_header_from_content($content, $file, $folder);
+                if ($header) {
+                    $stmtUpdate = $db->prepare("UPDATE cached_emails SET 
+                        subject = :subject, `from` = :from, `to` = :to, cc = :cc, date = :date, snippet = :snippet 
+                        WHERE id = :id");
+                    $stmtUpdate->execute([
+                        ':id' => $file,
+                        ':subject' => $header['subject'],
+                        ':from' => $header['from'],
+                        ':to' => $header['to'],
+                        ':cc' => $header['cc'],
+                        ':date' => $header['date'],
+                        ':snippet' => $header['snippet']
+                    ]);
+                }
+            }
+        }
+    }
+    
+    // Fetch slice with full metadata
+    $stmt = $db->prepare("SELECT id, subject, `from`, `to`, cc, date, timestamp, seen, flagged, snippet, folder 
+                          FROM cached_emails 
+                          WHERE username = :username AND folder = :folder 
+                          ORDER BY timestamp DESC, id DESC LIMIT :limit OFFSET :offset");
+    $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+    $stmt->bindValue(':folder', $folder, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $emails = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($emails as &$em) {
+        $em['seen'] = (int)$em['seen'];
+        $em['flagged'] = (int)$em['flagged'];
+    }
+    
+    // Total count of emails in folder
+    $stmtCount = $db->prepare("SELECT COUNT(*) FROM cached_emails WHERE username = :username AND folder = :folder");
+    $stmtCount->execute([':username' => $username, ':folder' => $folder]);
+    $total = (int)$stmtCount->fetchColumn();
+    
+    return ['emails' => $emails, 'total' => $total];
 }
 
 function find_email_path(string $username, string $folder, string $email_id): ?array {
@@ -986,33 +1209,11 @@ switch ($action) {
         $starred_unread = 0;
         
         foreach ($folders_to_check as $f) {
-            $new_dir = ($f === 'INBOX') ? 'new' : '.' . $f . '/new';
-            $cur_dir = ($f === 'INBOX') ? 'cur' : '.' . $f . '/cur';
+            sync_folder_cache($username, $f, $db);
             
-            $unread = 0;
-            $new_files = secure_list_files($username, $new_dir);
-            foreach ($new_files as $file) {
-                $unread++;
-                $parts = explode(':2,', $file);
-                $flags = (count($parts) > 1) ? $parts[1] : '';
-                if (strpos($flags, 'F') !== false) {
-                    $starred_unread++;
-                }
-            }
-            
-            $cur_files = secure_list_files($username, $cur_dir);
-            foreach ($cur_files as $file) {
-                $parts = explode(':2,', $file);
-                $flags = (count($parts) > 1) ? $parts[1] : '';
-                $is_seen = (strpos($flags, 'S') !== false);
-                $is_flagged = (strpos($flags, 'F') !== false);
-                if (!$is_seen) {
-                    $unread++;
-                    if ($is_flagged) {
-                        $starred_unread++;
-                    }
-                }
-            }
+            $stmt = $db->prepare("SELECT COUNT(*) FROM cached_emails WHERE username = :username AND folder = :folder AND seen = 0");
+            $stmt->execute([':username' => $username, ':folder' => $f]);
+            $unread = (int)$stmt->fetchColumn();
             
             if ($f === 'INBOX') {
                 $local_inbox_unread = $unread;
@@ -1023,6 +1224,9 @@ switch ($action) {
             }
         }
         
+        $stmt = $db->prepare("SELECT COUNT(*) FROM cached_emails WHERE username = :username AND flagged = 1 AND seen = 0");
+        $stmt->execute([':username' => $username]);
+        $starred_unread = (int)$stmt->fetchColumn();
         if ($starred_unread > 0) {
             $counts['Starred'] = $starred_unread;
         }
@@ -1054,6 +1258,8 @@ switch ($action) {
         check_auth();
         $username = $_SESSION['username'];
         $folder = $_GET['folder'] ?? 'INBOX';
+        $offset = intval($_GET['offset'] ?? 0);
+        $limit = intval($_GET['limit'] ?? 30);
         
         // Apply mail filtering rules on new emails
         apply_mail_filters($username, $db);
@@ -1067,22 +1273,13 @@ switch ($action) {
             $emails = [];
             foreach ($active_accounts as $account) {
                 if ($account['service_type'] === 'onto') {
-                    // Fetch local INBOX emails
-                    $sub_paths = ['new', 'cur'];
-                    foreach ($sub_paths as $sub_path) {
-                        $files = secure_list_files($username, $sub_path);
-                        foreach ($files as $file) {
-                            $content = secure_read_file($username, $sub_path, $file);
-                            if ($content) {
-                                $header = parse_email_header_from_content($content, $file, 'INBOX');
-                                if ($header) {
-                                    $header['account_color'] = $account['color'];
-                                    $header['account_email'] = $account['email'];
-                                    $header['account_id'] = $account['id'];
-                                    $emails[] = $header;
-                                }
-                            }
-                        }
+                    // Fetch local INBOX emails using get_emails_in_folder
+                    $local_emails = get_emails_in_folder($username, 'INBOX', $db);
+                    foreach ($local_emails as $em) {
+                        $em['account_color'] = $account['color'];
+                        $em['account_email'] = $account['email'];
+                        $em['account_id'] = $account['id'];
+                        $emails[] = $em;
                     }
                 } else {
                     // Mock emails for external accounts in unified inbox
@@ -1119,7 +1316,19 @@ switch ($action) {
             }
             
             usort($emails, fn($a, $b) => $b['timestamp'] - $a['timestamp']);
-            respond(true, '성공', ['emails' => $emails]);
+            $total = count($emails);
+            $slice = array_slice($emails, $offset, $limit);
+            
+            // Save senders to auto_senders table
+            $auto_senders_to_save = [];
+            foreach ($slice as $em) {
+                if (!empty($em['from'])) {
+                    $auto_senders_to_save[$em['from']] = true;
+                }
+            }
+            save_auto_senders_batch($username, $db, array_keys($auto_senders_to_save));
+            
+            respond(true, '성공', ['emails' => $slice, 'total' => $total, 'offset' => $offset, 'limit' => $limit]);
             break;
         }
 
@@ -1170,7 +1379,9 @@ switch ($action) {
                         'account_id' => $account['id']
                     ];
                 }
-                respond(true, '성공', ['emails' => $emails]);
+                $total = count($emails);
+                $slice = array_slice($emails, $offset, $limit);
+                respond(true, '성공', ['emails' => $slice, 'total' => $total, 'offset' => $offset, 'limit' => $limit]);
                 break;
             }
         }
@@ -1181,6 +1392,7 @@ switch ($action) {
         }
         
         $emails = [];
+        $total = 0;
         if ($folder === 'Starred') {
             // Aggregate all flagged/starred emails from all folders
             $tags = [];
@@ -1201,41 +1413,24 @@ switch ($action) {
             
             $all_folders = array_merge(['INBOX', 'Sent', 'Drafts', 'Spam', 'Trash'], $tags);
             foreach ($all_folders as $f) {
-                $sub_paths = ($f === 'INBOX') ? ['new', 'cur'] : ['.' . $f . '/new', '.' . $f . '/cur'];
-                foreach ($sub_paths as $sub_path) {
-                    $files = secure_list_files($username, $sub_path);
-                    foreach ($files as $file) {
-                        $is_flagged = false;
-                        $parts = explode(':2,', $file);
-                        if (count($parts) > 1 && strpos($parts[1], 'F') !== false) {
-                            $is_flagged = true;
-                        }
-                        if ($is_flagged) {
-                            $content = secure_read_file($username, $sub_path, $file);
-                            if ($content) {
-                                $header = parse_email_header_from_content($content, $file, $f);
-                                if ($header) {
-                                    $emails[] = $header;
-                                }
-                            }
-                        }
-                    }
-                }
+                sync_folder_cache($username, $f, $db);
             }
+            
+            $stmt = $db->prepare("SELECT id, subject, `from`, `to`, cc, date, timestamp, seen, flagged, snippet, folder FROM cached_emails WHERE username = :username AND flagged = 1");
+            $stmt->execute([':username' => $username]);
+            $emails = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($emails as &$em) {
+                $em['seen'] = (int)$em['seen'];
+                $em['flagged'] = (int)$em['flagged'];
+            }
+            usort($emails, fn($a, $b) => $b['timestamp'] - $a['timestamp']);
+            
+            $total = count($emails);
+            $emails = array_slice($emails, $offset, $limit);
         } else {
-            $sub_paths = ($folder === 'INBOX') ? ['new', 'cur'] : ['.' . $folder . '/new', '.' . $folder . '/cur'];
-            foreach ($sub_paths as $sub_path) {
-                $files = secure_list_files($username, $sub_path);
-                foreach ($files as $file) {
-                    $content = secure_read_file($username, $sub_path, $file);
-                    if ($content) {
-                        $header = parse_email_header_from_content($content, $file, $folder);
-                        if ($header) {
-                            $emails[] = $header;
-                        }
-                    }
-                }
-            }
+            $res = get_emails_in_folder_paginated($username, $folder, $offset, $limit, $db);
+            $emails = $res['emails'];
+            $total = $res['total'];
         }
         
         // Save senders to auto_senders table
@@ -1247,8 +1442,7 @@ switch ($action) {
         }
         save_auto_senders_batch($username, $db, array_keys($auto_senders_to_save));
 
-        usort($emails, fn($a, $b) => $b['timestamp'] - $a['timestamp']);
-        respond(true, '성공', ['emails' => $emails]);
+        respond(true, '성공', ['emails' => $emails, 'total' => $total, 'offset' => $offset, 'limit' => $limit]);
         break;
 
     case 'read_email':
@@ -1354,6 +1548,8 @@ switch ($action) {
         if ($need_rename) {
             secure_move_file($username, $src_sub, $dest_sub, $email_id, $new_id);
             $content = secure_read_file($username, $dest_sub, $new_id);
+            $stmt = $db->prepare("DELETE FROM cached_emails WHERE id = :id");
+            $stmt->execute([':id' => $email_id]);
         }
         
         if ($content) {
@@ -1389,12 +1585,16 @@ switch ($action) {
         $is_trash = ($folder === 'Trash' || substr_compare($folder, '_Trash', -strlen('_Trash')) === 0);
         if ($is_trash) {
             if (secure_delete_file($username, $found_sub, $email_id)) {
+                $stmt = $db->prepare("DELETE FROM cached_emails WHERE id = :id");
+                $stmt->execute([':id' => $email_id]);
                 respond(true, '이메일이 영구 삭제되었습니다.');
             } else {
                 respond(false, '삭제에 실패했습니다.');
             }
         } else {
             if (secure_move_file($username, $found_sub, '.Trash/cur', $email_id)) {
+                $stmt = $db->prepare("DELETE FROM cached_emails WHERE id = :id");
+                $stmt->execute([':id' => $email_id]);
                 respond(true, '이메일이 휴지통으로 이동되었습니다.');
             } else {
                 respond(false, '휴지통 이동에 실패했습니다.');
@@ -1703,6 +1903,8 @@ switch ($action) {
                 }
             }
         }
+        $stmt = $db->prepare("DELETE FROM cached_emails WHERE username = :username AND folder = 'Trash'");
+        $stmt->execute([':username' => $username]);
         respond(true, '휴지통을 성공적으로 비웠습니다.');
         break;
 
@@ -2581,6 +2783,8 @@ switch ($action) {
         $dest_sub = ($dest_folder === 'INBOX') ? 'cur' : '.' . $dest_folder . '/cur';
 
         if (secure_move_file($username, $src_sub, $dest_sub, $email_id)) {
+            $stmt = $db->prepare("DELETE FROM cached_emails WHERE id = :id");
+            $stmt->execute([':id' => $email_id]);
             respond(true, '이메일이 성공적으로 이동되었습니다.');
         } else {
             respond(false, '이메일 이동에 실패했습니다.');
@@ -2687,6 +2891,8 @@ switch ($action) {
         $new_id = $base_name . ':2,' . $new_flags;
 
         if (secure_move_file($username, $found_sub, $found_sub, $email_id, $new_id)) {
+            $stmt = $db->prepare("DELETE FROM cached_emails WHERE id = :id");
+            $stmt->execute([':id' => $email_id]);
             respond(true, '성공', ['new_id' => $new_id, 'flagged' => !$is_flagged]);
         } else {
             respond(false, '플래그 변경에 실패했습니다.');
@@ -3109,24 +3315,21 @@ function check_and_seed_address_groups(string $username, PDO $db): void {
 }
 
 function get_received_senders(string $username, PDO $db): array {
-    $senders = [];
-    $sub_paths = ['new', 'cur'];
+    // Sync INBOX cache first to make sure it's up to date
+    sync_folder_cache($username, 'INBOX', $db);
+    
+    // Query cached emails from DB
+    $stmt = $db->prepare("SELECT `from`, `to`, cc FROM cached_emails WHERE username = :username AND folder = 'INBOX'");
+    $stmt->execute([':username' => $username]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     $strings_to_save = [];
-    foreach ($sub_paths as $sub_path) {
-        $files = secure_list_files($username, $sub_path);
-        foreach ($files as $file) {
-            $content = secure_read_file($username, $sub_path, $file);
-            if ($content) {
-                $parts = explode("\n\n", str_replace("\r", "", $content), 2);
-                $header_raw = $parts[0] ?? '';
-                $headers = parse_headers($header_raw);
-                if (isset($headers['from'])) $strings_to_save[] = robust_decode_header($headers['from']);
-                if (isset($headers['to'])) $strings_to_save[] = robust_decode_header($headers['to']);
-                if (isset($headers['cc'])) $strings_to_save[] = robust_decode_header($headers['cc']);
-            }
-        }
+    foreach ($rows as $row) {
+        if (!empty($row['from'])) $strings_to_save[] = $row['from'];
+        if (!empty($row['to'])) $strings_to_save[] = $row['to'];
+        if (!empty($row['cc'])) $strings_to_save[] = $row['cc'];
     }
+    
     save_auto_senders_batch($username, $db, $strings_to_save);
     
     // Fetch all from auto_senders

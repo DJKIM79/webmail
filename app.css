@@ -344,7 +344,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: var(--bg-pane-header);
+    background: var(--bg-reader-pane);
     height: 70px;
     flex-shrink: 0;
     position: relative; /* 모바일 검색창 절대 위치 기준점 */
@@ -547,7 +547,7 @@ body {
     gap: 10px;
     color: var(--text-muted);
     font-size: 13px;
-    min-height: 160px;
+    min-height: 0;
 }
 
 .mail-list-empty-overlay i {
@@ -594,7 +594,7 @@ body {
 }
 
 .reader-header {
-    padding: 24px 32px;
+    padding: 24px 8px;
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-pane-header);
 }
@@ -2763,9 +2763,9 @@ body.theme-black {
     --bg-surface: rgba(10, 10, 10, 0.9);
     --bg-surface-solid: #0a0a0a;
     --bg-sidebar: rgba(5, 5, 5, 0.9);
-    --bg-list-pane: rgba(5, 5, 5, 0.6);
-    --bg-reader-pane: rgba(0, 0, 0, 0.95);
-    --bg-pane-header: rgba(8, 8, 8, 0.9);
+    --bg-list-pane: #121212;
+    --bg-reader-pane: #020202;
+    --bg-pane-header: #121212;
     --border-color: rgba(255, 255, 255, 0.06);
 
     --text-primary: #e2e8f0;
@@ -2817,9 +2817,9 @@ body.theme-white {
     --bg-surface: #ffffff;
     --bg-surface-solid: #ffffff;
     --bg-sidebar: #fafafa;
-    --bg-list-pane: #ffffff;
+    --bg-list-pane: #f4f4f5; /* zinc-100 */
     --bg-reader-pane: #ffffff;
-    --bg-pane-header: #ffffff;
+    --bg-pane-header: #f4f4f5; /* zinc-100 */
     --border-color: #eaeaea;
     
     --text-primary: #0f172a;
@@ -4377,10 +4377,25 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .confirm-message {
+    flex: 1;
+    min-width: 0;
     font-size: 14px;
     line-height: 1.6;
     color: var(--text-primary);
     white-space: pre-line;
+    word-break: break-all;
+    overflow-wrap: break-word;
+}
+
+.confirm-url {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-primary);
+    font-weight: 500;
+    margin-top: 8px;
 }
 
 .confirm-footer {
@@ -4930,11 +4945,11 @@ body.theme-white .btn-close-modal:hover {
 }
 
 .mail-list-table tbody td:first-child {
-    border-left: 4px solid transparent !important; /* 기본 상태에서 미리 공간을 확보 */
+    border-left: 4px solid var(--bg-list-pane) !important; /* 기본 상태에서 배경색과 맞추어 틈새 비침 방지 */
 }
 
 .mail-list-table thead th:first-child {
-    border-left: 4px solid transparent !important; /* 헤더도 내용 셀과 4px 왼쪽 여백을 맞춤 */
+    border-left: none !important; /* 헤더는 선택선이 필요 없으므로 경계 틈새 제거 */
 }
 
 .mail-list-table tbody tr.mail-item.selected td:first-child {
@@ -5033,6 +5048,9 @@ body.theme-white .btn-close-modal:hover {
     width: 14px !important;
     height: 14px !important;
     accent-color: var(--color-primary) !important;
+    vertical-align: middle !important;
+    margin: 0 !important;
+    display: inline-block !important;
 }
 
 #chk-all-emails {
@@ -5132,6 +5150,10 @@ body.theme-white .btn-close-modal:hover {
     display: none !important;
 }
 */
+
+#main-content.empty-mailbox .mail-items-list {
+    overflow: hidden !important;
+}
 
 /* Disable pointer events on iframe during resizing to avoid drag lag */
 body.resizing iframe {

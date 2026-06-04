@@ -644,12 +644,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         loadExternalMailsAndRenderSidebar(state.currentFolder).then(() => {
-            // 외부 계정 2개 이상이면 unified_inbox, 아니면 INBOX 자동 선택
-            const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
-            state.currentFolder = activeAccs.length > 1 ? 'unified_inbox' : 'INBOX';
-            syncActiveFolderUI();
             updateGlobalUnreadCount();
-            loadEmails(state.currentFolder);
         });
         
         // Start polling (every 30 seconds)
@@ -765,10 +760,43 @@ document.addEventListener('DOMContentLoaded', () => {
     // MAIL ACTIONS (LIST, READ, DELETE, SEND)
     // --------------------------------------------------
     async function loadEmails(folder, showLoading = true) {
+        const activeAccounts = (state.externalMails || []).filter(a => a.is_active === 1);
+        if (state.externalMails && activeAccounts.length === 0) {
+            state.currentFolder = folder;
+            syncActiveFolderUI();
+            folderTitle.innerHTML = `<span style="margin-right:16px; opacity:0.8;">${getFolderIcon(folder)}</span>${getFolderDisplayName(folder)}`;
+
+            if (btnRefresh) {
+                btnRefresh.classList.remove('refreshing');
+            }
+            state.emails = [];
+            renderMailList();
+            
+            const existingOverlay = mailContainer.querySelector('.mail-list-empty-overlay');
+            if (existingOverlay) {
+                existingOverlay.innerHTML = `
+                    <i class="fa-solid fa-triangle-exclamation" style="color: var(--color-warning, #f59e0b); font-size: 32px; margin-bottom: 8px;"></i>
+                    <span style="font-weight: 500; font-size: 15px; color: var(--text-primary); display: block;">활성화된 메일 계정이 없습니다.</span>
+                    <span style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; display: block;">메일 서비스 이용을 위해 메일을 설정해 주세요.</span>
+                `;
+            }
+            
+            if (readerContent) readerContent.classList.add('hidden');
+            if (readerEmpty) readerEmpty.classList.remove('hidden');
+            updateGlobalUnreadCount();
+            return;
+        }
+
         const isSameFolder = (state.currentFolder === folder);
         state.currentFolder = folder;
         syncActiveFolderUI();
         folderTitle.innerHTML = `<span style="margin-right:16px; opacity:0.8;">${getFolderIcon(folder)}</span>${getFolderDisplayName(folder)}`;
+
+        // Reset pagination parameters
+        state.offset = 0;
+        state.hasMore = true;
+        state.isLoadingMore = false;
+        state.totalEmails = 0;
 
         // Apply global saved height
         const globalSavedHeight = getCookie('listHeight');
@@ -828,8 +856,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Fetch emails from the server
-        const res = await apiRequest('list_emails', 'GET', { folder });
+        // Fetch emails from the server with pagination
+        const res = await apiRequest('list_emails', 'GET', { folder, offset: 0, limit: 30 });
         
         const elapsed = Date.now() - startTime;
         const minDuration = 800; // Matches CSS animation duration for a full 180deg cycle
@@ -843,6 +871,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (res.success) {
             const nextEmails = res.emails || [];
+            state.totalEmails = res.total || nextEmails.length;
+            state.hasMore = (nextEmails.length < state.totalEmails);
             state.folderCache[folder] = nextEmails; // Update cache
             
             if (folder === 'Trash' && btnEmptyTrash) {
@@ -961,6 +991,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (readerEmpty) readerEmpty.classList.remove('hidden');
                             }
                             renderMailList();
+                        } else {
+                            // If the 'no active accounts' warning is visible, force refresh even if email count (0) is identical.
+                            const emptyOverlay = mailContainer.querySelector('.mail-list-empty-overlay');
+                            if (emptyOverlay && emptyOverlay.textContent.includes('활성화된 메일 계정')) {
+                                renderMailList();
+                            }
                         }
                         updateGlobalUnreadCount();
                     }
@@ -994,6 +1030,53 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnRefresh.classList.add('error');
             }
         }
+    }
+
+    async function loadMoreEmails() {
+        if (state.isLoadingMore || !state.hasMore) return;
+        state.isLoadingMore = true;
+        
+        let tbody = mailContainer.querySelector('#mail-list-tbody');
+        let loadingRow = null;
+        if (tbody) {
+            loadingRow = document.createElement('tr');
+            loadingRow.id = 'mail-list-loading-row';
+            loadingRow.innerHTML = `<td colspan="7" style="text-align: center; padding: 16px 0; color: var(--text-secondary); background: rgba(255, 255, 255, 0.05);"><i class="fa-solid fa-spinner fa-spin" style="margin-right: 8px;"></i>추가 메일을 불러오는 중입니다...</td>`;
+            tbody.appendChild(loadingRow);
+        }
+        
+        const folder = state.currentFolder;
+        const nextOffset = state.emails.length;
+        
+        const res = await apiRequest('list_emails', 'GET', { folder, offset: nextOffset, limit: 30 });
+        
+        if (loadingRow) {
+            loadingRow.remove();
+        }
+        
+        if (res.success && state.currentFolder === folder) {
+            const nextEmails = res.emails || [];
+            if (nextEmails.length > 0) {
+                state.emails = state.emails.concat(nextEmails);
+                state.folderCache[folder] = state.emails;
+                renderMailList();
+            }
+            state.totalEmails = res.total || state.emails.length;
+            state.hasMore = (state.emails.length < state.totalEmails);
+        }
+        
+        state.isLoadingMore = false;
+    }
+
+    // Attach scroll listener to mail container for infinite scroll
+    if (mailContainer) {
+        mailContainer.addEventListener('scroll', () => {
+            const threshold = 100; // pixels from bottom
+            const isNearBottom = mailContainer.scrollTop + mailContainer.clientHeight >= mailContainer.scrollHeight - threshold;
+            if (isNearBottom && state.hasMore && !state.isLoadingMore) {
+                loadMoreEmails();
+            }
+        });
     }
 
     function getFolderIcon(folder) {
@@ -1620,7 +1703,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 e.preventDefault();
                                 const url = a.href;
                                 if (url.startsWith('http://') || url.startsWith('https://')) {
-                                    customConfirm(`외부 링크로 이동하시겠습니까?\n\n${url}`, 'fa-solid fa-link', '진행').then(confirmed => {
+                                    const escapedUrl = escapeHtml(url);
+                                    customConfirm(`외부 링크로 이동하시겠습니까?\n\n<span class="confirm-url" title="${escapedUrl}">${escapedUrl}</span>`, 'fa-solid fa-link', '진행').then(confirmed => {
                                         if (confirmed) {
                                             window.open(url, '_blank');
                                         }
@@ -3481,7 +3565,22 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await apiRequest('list_external_mails');
             if (res.success) {
                 state.externalMails = res.accounts || [];
-                await renderSidebar(folderToLoad);
+                const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
+                
+                // Adjust folder if current folder is no longer valid or if multi/single status changed
+                let targetFolder = folderToLoad || state.currentFolder || 'INBOX';
+                if (activeAccs.length === 0) {
+                    targetFolder = 'INBOX';
+                } else if (activeAccs.length > 1 && (targetFolder === 'INBOX' || (!targetFolder.startsWith('ext_') && targetFolder !== 'unified_inbox'))) {
+                    if (['INBOX', 'Starred', 'Sent', 'Drafts', 'Spam', 'Trash'].includes(targetFolder)) {
+                        targetFolder = 'unified_inbox';
+                    }
+                } else if (activeAccs.length === 1 && (targetFolder === 'unified_inbox' || targetFolder.startsWith('ext_'))) {
+                    targetFolder = 'INBOX';
+                }
+                
+                await renderSidebar(targetFolder);
+                loadEmails(targetFolder);
             }
         } catch (err) {
             console.error('Error listing external mails:', err);
@@ -3494,7 +3593,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const activeAccounts = (state.externalMails || []).filter(a => a.is_active === 1);
 
-        if (activeAccounts.length <= 1) {
+        const btnCompose = document.getElementById('btn-compose');
+        if (btnCompose) {
+            if (activeAccounts.length === 0) {
+                btnCompose.classList.add('hidden');
+            } else {
+                btnCompose.classList.remove('hidden');
+            }
+        }
+
+        if (activeAccounts.length === 0) {
+            // Render no active accounts warning inside sidebar
+            sidebarNav.innerHTML = `
+                <div class="sidebar-no-accounts" style="padding: 24px 16px; text-align: center; color: var(--text-secondary); margin: 10px; border: 1px dashed var(--border-color); border-radius: 8px;">
+                    <i class="fa-solid fa-triangle-exclamation" style="font-size: 28px; margin-bottom: 12px; color: var(--color-warning, #f59e0b); display: block;"></i>
+                    <p style="font-size: 13px; margin: 0 0 16px 0; line-height: 1.5; font-weight: 500;">활성화된 메일 계정이 없습니다.</p>
+                    <button type="button" id="btn-sidebar-setup-mail" class="btn-submit" style="width: 100%; font-size: 12px; padding: 8px; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--color-primary); color: var(--color-primary-text); border: none; cursor: pointer; font-weight: 600; transition: background-color 0.2s;">
+                        <i class="fa-solid fa-gear"></i> 메일 설정하기
+                    </button>
+                </div>
+            `;
+            
+            const btnSidebarSetupMail = document.getElementById('btn-sidebar-setup-mail');
+            if (btnSidebarSetupMail) {
+                btnSidebarSetupMail.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const externalMailModal = document.getElementById('external-mail-modal');
+                    if (externalMailModal) {
+                        externalMailModal.classList.remove('hidden');
+                        loadExternalMailSettingsList();
+                    }
+                });
+            }
+        } else if (activeAccounts.length === 1) {
             // Render single account (standard) sidebar
             sidebarNav.innerHTML = `
                 <a href="#" class="nav-item" data-folder="INBOX">
@@ -4823,30 +4955,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Double click List Resizer to auto-fit item count (max 5)
     resizerList.addEventListener('dblclick', () => {
         const trs = mailListPane.querySelectorAll('.mail-list-table tbody tr.mail-item');
-        const header = mailListPane.querySelector('.pane-header');
-        const headerHeight = header ? header.offsetHeight : 55;
+        
+        const headerHeight = 71; // .pane-header (70px height + 1px border)
+        const theadHeight = 39;  // table thead
+        const minHeaderOnlyHeight = headerHeight + theadHeight; // Title headers height (110px)
         
         let targetHeight = 320;
         if (trs.length > 0) {
             const count = Math.min(trs.length, 5);
-            let itemsHeight = 0;
-            for (let i = 0; i < count; i++) {
-                itemsHeight += trs[i].offsetHeight || 34;
-            }
-            const thead = mailListPane.querySelector('.mail-list-table thead');
-            const theadHeight = thead ? thead.offsetHeight : 34;
-            
-            targetHeight = headerHeight + theadHeight + itemsHeight + 4;
+            // - Table Row: 34px height + 1px border = 35px
+            const itemsHeight = count * 35;
+            targetHeight = minHeaderOnlyHeight + itemsHeight + 8; // Auto-fit up to 5 items with padding
         } else {
-            const emptyMsg = mailListPane.querySelector('.list-empty') || mailListPane.querySelector('.mail-list-empty-overlay');
-            if (emptyMsg) {
-                targetHeight = headerHeight + emptyMsg.offsetHeight + 10;
-            } else {
-                targetHeight = headerHeight + 160; // minimum height when empty overlay is not yet layouted
-            }
+            // When empty, shrink completely to show only the header row to maximize reader pane space
+            targetHeight = minHeaderOnlyHeight + 4;
         }
         
-        if (targetHeight < 70) targetHeight = 70;
+        // Prevent list pane from shrinking below title headers height (110px)
+        if (targetHeight < minHeaderOnlyHeight) targetHeight = minHeaderOnlyHeight;
         
         listHeight = targetHeight;
         mailListPane.style.height = `${targetHeight}px`;
