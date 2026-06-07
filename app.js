@@ -1695,6 +1695,47 @@ document.addEventListener('DOMContentLoaded', () => {
                         mailBodyFrame.style.opacity = '1';
                     }, 50);
 
+                    // Auto-adjust iframe height on mobile devices to allow unified scrolling
+                    const isMobile = document.body.classList.contains('is-mobile-phone') || window.innerWidth <= 768;
+                    if (isMobile) {
+                        const adjustIframeHeight = () => {
+                            try {
+                                const iframeDoc = mailBodyFrame.contentDocument || mailBodyFrame.contentWindow.document;
+                                if (iframeDoc) {
+                                    iframeDoc.documentElement.style.overflow = 'hidden';
+                                    iframeDoc.body.style.overflow = 'hidden';
+                                    
+                                    const height = Math.max(
+                                        iframeDoc.documentElement.scrollHeight,
+                                        iframeDoc.body.scrollHeight,
+                                        iframeDoc.documentElement.offsetHeight,
+                                        iframeDoc.body.offsetHeight
+                                    );
+                                    mailBodyFrame.style.height = (height + 15) + 'px'; // add small padding safety
+                                }
+                            } catch (err) {
+                                console.error('Error auto-resizing iframe:', err);
+                            }
+                        };
+                        
+                        adjustIframeHeight();
+                        setTimeout(adjustIframeHeight, 150);
+                        setTimeout(adjustIframeHeight, 450);
+                        setTimeout(adjustIframeHeight, 900);
+                        
+                        try {
+                            const iframeDoc = mailBodyFrame.contentDocument || mailBodyFrame.contentWindow.document;
+                            if (iframeDoc && window.MutationObserver) {
+                                const observer = new MutationObserver(adjustIframeHeight);
+                                observer.observe(iframeDoc.body, { childList: true, subtree: true, attributes: true });
+                            }
+                        } catch (err) {
+                            console.warn('Could not attach MutationObserver to iframe:', err);
+                        }
+                    } else {
+                        mailBodyFrame.style.height = '100%';
+                    }
+
                     try {
                         const iframeDoc = mailBodyFrame.contentDocument || mailBodyFrame.contentWindow.document;
                         iframeDoc.addEventListener('click', function(e) {
@@ -4938,50 +4979,40 @@ document.addEventListener('DOMContentLoaded', () => {
     let listHeight = 290;
     let sidebarCollapsed = false;
 
-    // Double click Sidebar Resizer to restore default state (300px)
-    resizerSidebar.addEventListener('dblclick', () => {
-        sidebarCollapsed = false;
-        sidebar.classList.remove('collapsed');
-        sidebarWidth = 240;
-        sidebar.style.width = `${sidebarWidth}px`;
-        
-        const tagsPopover = document.getElementById('tags-popover');
-        if (tagsPopover) tagsPopover.classList.add('hidden');
-        
-        setCookie('sidebarWidth', sidebarWidth);
-        setCookie('sidebarCollapsed', sidebarCollapsed);
-    });
-
-    // Double click List Resizer to auto-fit item count (max 5)
-    resizerList.addEventListener('dblclick', () => {
-        const trs = mailListPane.querySelectorAll('.mail-list-table tbody tr.mail-item');
-        
-        const headerHeight = 71; // .pane-header (70px height + 1px border)
-        const theadHeight = 39;  // table thead
-        const minHeaderOnlyHeight = headerHeight + theadHeight; // Title headers height (110px)
-        
-        let targetHeight = 320;
-        if (trs.length > 0) {
-            const count = Math.min(trs.length, 5);
-            // - Table Row: 34px height + 1px border = 35px
-            const itemsHeight = count * 35;
-            targetHeight = minHeaderOnlyHeight + itemsHeight + 8; // Auto-fit up to 5 items with padding
-        } else {
-            // When empty, shrink completely to show only the header row to maximize reader pane space
-            targetHeight = minHeaderOnlyHeight + 4;
-        }
-        
-        // Prevent list pane from shrinking below title headers height (110px)
-        if (targetHeight < minHeaderOnlyHeight) targetHeight = minHeaderOnlyHeight;
-        
-        listHeight = targetHeight;
-        mailListPane.style.height = `${targetHeight}px`;
-        setCookie('listHeight', listHeight);
-    });
+    // Track taps for double click/tap detection
+    let lastSidebarTapTime = 0;
+    let lastSidebarTapX = 0;
+    let lastSidebarTapY = 0;
 
     // Resizing Sidebar
-    resizerSidebar.addEventListener('mousedown', (e) => {
-        e.preventDefault();
+    resizerSidebar.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        
+        const now = Date.now();
+        const dist = Math.hypot(e.clientX - lastSidebarTapX, e.clientY - lastSidebarTapY);
+        
+        if (now - lastSidebarTapTime < 300 && dist < 20) {
+            sidebarCollapsed = false;
+            sidebar.classList.remove('collapsed');
+            sidebarWidth = 240;
+            sidebar.style.width = `${sidebarWidth}px`;
+            
+            const tagsPopover = document.getElementById('tags-popover');
+            if (tagsPopover) tagsPopover.classList.add('hidden');
+            
+            setCookie('sidebarWidth', sidebarWidth);
+            setCookie('sidebarCollapsed', sidebarCollapsed);
+            
+            lastSidebarTapTime = 0;
+            if (e.cancelable) e.preventDefault();
+            return;
+        }
+        
+        lastSidebarTapTime = now;
+        lastSidebarTapX = e.clientX;
+        lastSidebarTapY = e.clientY;
+
+        if (e.cancelable) e.preventDefault();
         document.body.style.cursor = 'col-resize';
         document.body.classList.add('resizing');
         resizerSidebar.classList.add('dragging');
@@ -4990,7 +5021,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let ticking = false;
         let lastClientX = 0;
         
-        function onMouseMove(event) {
+        function onPointerMove(event) {
             lastClientX = event.clientX;
             if (!ticking) {
                 window.requestAnimationFrame(() => {
@@ -5016,24 +5047,66 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
-        function onMouseUp() {
+        function onPointerUp() {
             document.body.style.cursor = '';
             document.body.classList.remove('resizing');
             resizerSidebar.classList.remove('dragging');
             sidebar.classList.remove('resizing');
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            document.removeEventListener('pointercancel', onPointerUp);
             setCookie('sidebarWidth', sidebarWidth);
             setCookie('sidebarCollapsed', sidebarCollapsed);
         }
         
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+        document.addEventListener('pointercancel', onPointerUp);
     });
 
+    let lastListTapTime = 0;
+    let lastListTapX = 0;
+    let lastListTapY = 0;
+
     // Resizing Mail List (Vertical Row Resize)
-    resizerList.addEventListener('mousedown', (e) => {
-        e.preventDefault();
+    resizerList.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        
+        const now = Date.now();
+        const dist = Math.hypot(e.clientX - lastListTapX, e.clientY - lastListTapY);
+        
+        if (now - lastListTapTime < 300 && dist < 20) {
+            const trs = mailListPane.querySelectorAll('.mail-list-table tbody tr.mail-item');
+            
+            const headerHeight = 71; // .pane-header (70px height + 1px border)
+            const theadHeight = 39;  // table thead
+            const minHeaderOnlyHeight = headerHeight + theadHeight; // Title headers height (110px)
+            
+            let targetHeight = 320;
+            if (trs.length > 0) {
+                const count = Math.min(trs.length, 5);
+                const itemsHeight = count * 35;
+                targetHeight = minHeaderOnlyHeight + itemsHeight + 8;
+            } else {
+                targetHeight = minHeaderOnlyHeight + 4;
+            }
+            
+            if (targetHeight < minHeaderOnlyHeight) targetHeight = minHeaderOnlyHeight;
+            
+            listHeight = targetHeight;
+            mailListPane.style.height = `${targetHeight}px`;
+            setCookie('listHeight', listHeight);
+            
+            lastListTapTime = 0;
+            if (e.cancelable) e.preventDefault();
+            return;
+        }
+        
+        lastListTapTime = now;
+        lastListTapX = e.clientX;
+        lastListTapY = e.clientY;
+
+        if (e.cancelable) e.preventDefault();
         document.body.style.cursor = 'row-resize';
         document.body.classList.add('resizing');
         document.getElementById('app').classList.add('resizing');
@@ -5046,7 +5119,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let ticking = false;
         let lastClientY = 0;
         
-        function onMouseMove(event) {
+        function onPointerMove(event) {
             lastClientY = event.clientY;
             if (!ticking) {
                 window.requestAnimationFrame(() => {
@@ -5065,19 +5138,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
-        function onMouseUp() {
+        function onPointerUp() {
             document.body.style.cursor = '';
             document.body.classList.remove('resizing');
             document.getElementById('app').classList.remove('resizing');
             resizerList.classList.remove('dragging');
             mailListPane.classList.remove('resizing');
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            document.removeEventListener('pointercancel', onPointerUp);
             setCookie('listHeight', listHeight);
         }
         
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+        document.addEventListener('pointercancel', onPointerUp);
     });
 
     // --------------------------------------------------
@@ -5722,8 +5797,65 @@ document.addEventListener('DOMContentLoaded', () => {
                 resizer.className = 'col-resizer';
                 th.appendChild(resizer);
 
-                resizer.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
+                resizer.addEventListener('pointerdown', (e) => {
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                    
+                    const now = Date.now();
+                    const lastTapTime = resizer.lastTapTime || 0;
+                    const lastTapX = resizer.lastTapX || 0;
+                    const lastTapY = resizer.lastTapY || 0;
+                    const dist = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY);
+                    
+                    if (now - lastTapTime < 300 && dist < 20) {
+                        // Browser-native auto-fit calculation with transition handling
+                        const oldTableLayout = table.style.tableLayout;
+                        const oldTableWidth = table.style.width;
+                        const oldThWidth = th.style.width;
+
+                        // Disable transitions temporarily during measurement using the existing resizing class
+                        table.classList.add('resizing');
+
+                        table.style.tableLayout = 'auto';
+                        table.style.width = 'auto';
+                        th.style.width = 'auto';
+
+                        // Force browser reflow to get the natural un-truncated content width
+                        let autoWidth = th.offsetWidth;
+
+                        // Restore table styles
+                        table.style.tableLayout = oldTableLayout || 'fixed';
+                        table.style.width = oldTableWidth || '100%';
+                        th.style.width = oldThWidth;
+
+                        // Force layout sync to apply the restored width before re-enabling transitions
+                        table.offsetHeight;
+
+                        // Re-enable transitions
+                        table.classList.remove('resizing');
+
+                        // Add a small safety padding (4px) to prevent rounding-related truncation
+                        autoWidth = Math.ceil(autoWidth) + 4;
+
+                        if (autoWidth < 60) autoWidth = 60;
+                        if (autoWidth > 800) autoWidth = 800; // Limit maximum
+
+                        // Apply the new width, which will trigger the CSS transition
+                        th.style.width = autoWidth + 'px';
+                        updateTableMinWidth();
+
+                        setCookie('colWidth_' + colName, autoWidth);
+                        
+                        resizer.lastTapTime = 0;
+                        if (e.cancelable) e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                    
+                    resizer.lastTapTime = now;
+                    resizer.lastTapX = e.clientX;
+                    resizer.lastTapY = e.clientY;
+
+                    if (e.cancelable) e.preventDefault();
                     e.stopPropagation();
                     
                     const startX = e.clientX;
@@ -5733,7 +5865,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     resizer.classList.add('dragging');
                     table.classList.add('resizing');
                     
-                    function onMouseMove(event) {
+                    function onPointerMove(event) {
                         const delta = event.clientX - startX;
                         const width = startWidth + delta;
                         const minWidth = 60; 
@@ -5743,62 +5875,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                     
-                    function onMouseUp() {
+                    function onPointerUp() {
                         document.body.style.cursor = '';
                         resizer.classList.remove('dragging');
                         table.classList.remove('resizing');
-                        document.removeEventListener('mousemove', onMouseMove);
-                        document.removeEventListener('mouseup', onMouseUp);
+                        document.removeEventListener('pointermove', onPointerMove);
+                        document.removeEventListener('pointerup', onPointerUp);
+                        document.removeEventListener('pointercancel', onPointerUp);
                         
                         setCookie('colWidth_' + colName, parseFloat(th.style.width));
                     }
                     
-                    document.addEventListener('mousemove', onMouseMove);
-                    document.addEventListener('mouseup', onMouseUp);
-                });
-
-                // Double click behavior
-                resizer.addEventListener('dblclick', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    // Browser-native auto-fit calculation with transition handling
-                    const oldTableLayout = table.style.tableLayout;
-                    const oldTableWidth = table.style.width;
-                    const oldThWidth = th.style.width;
-
-                    // Disable transitions temporarily during measurement using the existing resizing class
-                    table.classList.add('resizing');
-
-                    table.style.tableLayout = 'auto';
-                    table.style.width = 'auto';
-                    th.style.width = 'auto';
-
-                    // Force browser reflow to get the natural un-truncated content width
-                    let autoWidth = th.offsetWidth;
-
-                    // Restore table styles
-                    table.style.tableLayout = oldTableLayout || 'fixed';
-                    table.style.width = oldTableWidth || '100%';
-                    th.style.width = oldThWidth;
-
-                    // Force layout sync to apply the restored width before re-enabling transitions
-                    table.offsetHeight;
-
-                    // Re-enable transitions
-                    table.classList.remove('resizing');
-
-                    // Add a small safety padding (4px) to prevent rounding-related truncation
-                    autoWidth = Math.ceil(autoWidth) + 4;
-
-                    if (autoWidth < 60) autoWidth = 60;
-                    if (autoWidth > 800) autoWidth = 800; // Limit maximum
-
-                    // Apply the new width, which will trigger the CSS transition
-                    th.style.width = autoWidth + 'px';
-                    updateTableMinWidth();
-
-                    setCookie('colWidth_' + colName, autoWidth);
+                    document.addEventListener('pointermove', onPointerMove);
+                    document.addEventListener('pointerup', onPointerUp);
+                    document.addEventListener('pointercancel', onPointerUp);
                 });
             }
         });

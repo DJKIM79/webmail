@@ -666,6 +666,24 @@ body {
     border-color: rgba(239, 68, 68, 0.3);
 }
 
+/* Mobile adjustments for reader action buttons */
+.is-mobile-phone .reader-actions {
+    gap: 6px;
+}
+
+.is-mobile-phone .reader-actions .btn-action {
+    padding: 8px 10px;
+    gap: 0;
+}
+
+.is-mobile-phone .reader-actions .btn-action span {
+    display: none;
+}
+
+.is-mobile-phone .reader-actions .btn-action i.fa-caret-down {
+    display: none;
+}
+
 /* External mail account delete button - solid red */
 .btn-submit.btn-danger-action {
     background: rgba(239, 68, 68, 0.12);
@@ -1974,6 +1992,7 @@ body.theme-white .table-selector-info {
     transition: background var(--transition-fast), box-shadow var(--transition-fast);
     z-index: 10;
     height: 100%;
+    touch-action: none;
 }
 
 #resizer-list {
@@ -2050,7 +2069,7 @@ body.theme-white .table-selector-info {
     width: 44px !important;
     height: 44px !important;
     border-radius: var(--radius-md) !important; /* 사각형 배경 */
-    margin-bottom: 32px;
+    margin-bottom: 24px;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -3639,7 +3658,7 @@ body.theme-white .btn-close-modal:hover {
 .is-mobile-phone .sidebar.collapsed .btn-compose {
     justify-content: center !important;
     width: 44px !important;
-    margin: 0 auto 32px auto !important; /* PC 판처럼 여백 공간을 조절 (margin-bottom: 32px) */
+    margin: 0 auto 24px auto !important; /* 펼쳐졌을 때의 margin-bottom: 24px와 일치시켜 세로축 튐 방지 */
 }
 
 .is-mobile-phone .sidebar.collapsed .user-actions {
@@ -3716,6 +3735,23 @@ body.theme-white .btn-close-modal:hover {
     display: block;
     opacity: 0;
     transition: opacity var(--transition-fast) ease-in-out;
+}
+
+/* 모바일 메일 상세 보기 스크롤 최적화 (헤더와 메일 본문 영역 통합 스크롤) */
+.is-mobile-phone .reader-content {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+.is-mobile-phone .reader-body {
+    height: auto !important;
+    overflow: visible !important;
+    flex: none !important;
+}
+
+.is-mobile-phone #mail-body-frame {
+    height: auto;
+    overflow: hidden !important;
 }
 
 /* 사이드바 리사이저 (col-resize) - 16px 감지 영역 */
@@ -5093,6 +5129,7 @@ body.theme-white .btn-close-modal:hover {
     cursor: col-resize !important;
     user-select: none !important;
     z-index: 20 !important;
+    touch-action: none;
 }
 
 .col-resizer:hover,
@@ -5158,6 +5195,11 @@ body.theme-white .btn-close-modal:hover {
 /* Disable pointer events on iframe during resizing to avoid drag lag */
 body.resizing iframe {
     pointer-events: none !important;
+}
+
+body.resizing {
+    user-select: none !important;
+    -webkit-user-select: none !important;
 }
 
 /* =================================================--

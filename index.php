@@ -195,15 +195,15 @@
                             </div>
                         </div>
                         <div class="reader-actions">
-                            <button id="btn-reply" class="btn-action"><i class="fa-solid fa-reply"></i> 답장</button>
-                            <button id="btn-forward" class="btn-action"><i class="fa-solid fa-share"></i> 전달</button>
+                            <button id="btn-reply" class="btn-action"><i class="fa-solid fa-reply"></i> <span>답장</span></button>
+                            <button id="btn-forward" class="btn-action"><i class="fa-solid fa-share"></i> <span>전달</span></button>
                             <div class="dropdown-tag-move">
-                                <button id="btn-move-tag" class="btn-action"><i class="fa-solid fa-box-archive"></i> 이동 <i class="fa-solid fa-caret-down"></i></button>
+                                <button id="btn-move-tag" class="btn-action"><i class="fa-solid fa-box-archive"></i> <span>이동</span> <i class="fa-solid fa-caret-down"></i></button>
                                 <div id="tag-move-dropdown-list" class="dropdown-content hidden">
                                     <!-- Dynamic tag list dropdown -->
                                 </div>
                             </div>
-                            <button id="btn-delete-mail" class="btn-action btn-danger-action"><i class="fa-solid fa-trash"></i> 삭제</button>
+                            <button id="btn-delete-mail" class="btn-action btn-danger-action"><i class="fa-solid fa-trash"></i> <span>삭제</span></button>
                         </div>
                         <div id="read-attachments" class="read-attachments hidden">
                             <div class="read-attachments-title"><i class="fa-solid fa-paperclip"></i> 첨부 파일 (<span id="attachments-count">0</span>)</div>
