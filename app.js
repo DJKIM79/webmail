@@ -1468,6 +1468,67 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             mailContainer.appendChild(emptyOverlay);
         }
+
+        // --- First Visit Auto-Fit Logic ---
+        // Automatically set listHeight to double-click auto-fit target if no cookie exists
+        if (!getCookie('listHeight') && state.emails.length > 0) {
+            const trs = tbody.querySelectorAll('tr.mail-item');
+            if (trs.length > 0) {
+                const headerHeight = 71; 
+                const theadHeight = 39;  
+                const minHeaderOnlyHeight = headerHeight + theadHeight; 
+                
+                const count = Math.min(trs.length, 5);
+                const itemsHeight = count * 35;
+                let targetHeight = minHeaderOnlyHeight + itemsHeight + 8;
+                if (targetHeight < minHeaderOnlyHeight) targetHeight = minHeaderOnlyHeight;
+                
+                listHeight = targetHeight;
+                mailListPane.style.height = `${targetHeight}px`;
+                setCookie('listHeight', listHeight);
+            }
+        }
+
+        // Automatically set column widths to double-click natural size if no cookie exists
+        if (!getCookie('colWidth_subject') && state.emails.length > 0) {
+            const headers = table.querySelectorAll('thead th');
+            const oldTableLayout = table.style.tableLayout;
+            const oldTableWidth = table.style.width;
+
+            table.classList.add('resizing');
+            table.style.tableLayout = 'auto';
+            table.style.width = 'auto';
+
+            headers.forEach(th => {
+                const colClass = Array.from(th.classList).find(c => c.startsWith('col-'));
+                if (!colClass || colClass === 'col-chk' || colClass === 'col-starred-filter' || colClass === 'col-flag' || colClass === 'col-filler') return;
+                
+                th.style.width = 'auto';
+                let autoWidth = th.offsetWidth;
+                autoWidth = Math.ceil(autoWidth) + 4;
+                if (autoWidth < 60) autoWidth = 60;
+                if (autoWidth > 800) autoWidth = 800;
+                
+                const colName = colClass.replace('col-', '');
+                setCookie('colWidth_' + colName, autoWidth);
+                th.style.width = autoWidth + 'px';
+            });
+
+            table.style.tableLayout = oldTableLayout || 'fixed';
+            table.style.width = oldTableWidth || '100%';
+            table.offsetHeight; // Force layout sync
+            table.classList.remove('resizing');
+            
+            // Re-calculate minWidth after updating columns
+            let total = 0;
+            headers.forEach(h => {
+                if (!h.classList.contains('col-filler')) {
+                    total += parseFloat(h.style.width) || h.offsetWidth;
+                }
+            });
+            table.style.minWidth = `max(100%, ${total + 20}px)`;
+            table.style.width = '100%';
+        }
     }
 
     async function updateGlobalUnreadCount(sync = false) {
@@ -5814,7 +5875,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (now - lastSidebarTapTime < 300 && dist < 20) {
             sidebarCollapsed = false;
             sidebar.classList.remove('collapsed');
-            sidebarWidth = 240;
+            
+            const activeAccs = (state.externalMails || []).filter(a => a.is_active === 1);
+            sidebarWidth = activeAccs.length >= 2 ? 270 : 240;
+            
             sidebar.style.width = `${sidebarWidth}px`;
             
             const tagsPopover = document.getElementById('tags-popover');

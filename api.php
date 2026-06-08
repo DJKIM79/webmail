@@ -635,7 +635,7 @@ function robust_decode_header(string $value): string {
 
     // Normalize charset aliases before decoding
     $value = preg_replace_callback(
-        '/=\?(ks_c_5601[-_]1987|ks_c_5601|euc-kr|euckr)\?([BbQq])\?([^?]*)\?=/i',
+        '/=\?(ks_c_5601[-_]1987|ks_c_5601|ksc_5601[-_]1987|ksc_5601|euc-kr|euckr)\?([BbQq])\?([^?]*)\?=/i',
         function($m) {
             $encoding = strtoupper($m[2]);
             $data = $m[3];
@@ -723,7 +723,10 @@ function parse_multipart(string $body, string $content_type, string &$html_body,
                     parse_multipart($sub_body, $sub_type, $html_body, $text_body, $attachments);
                 } else {
                     if (preg_match('/charset="?([^";]+)"?/i', $sub_type, $cm)) {
-                        $charset = $cm[1];
+                        $charset = trim($cm[1], "\"' \t\n\r\0\x0B");
+                        if (preg_match('/^(ks_c_5601[-_]1987|ks_c_5601|ksc_5601[-_]1987|ksc_5601|euc-kr|euckr)$/i', $charset)) {
+                            $charset = 'EUC-KR';
+                        }
                         if (strcasecmp($charset, 'utf-8') !== 0) {
                             $converted = @mb_convert_encoding($sub_body, 'UTF-8', $charset);
                             if ($converted !== false) {
@@ -744,7 +747,10 @@ function parse_multipart(string $body, string $content_type, string &$html_body,
         }
     } else {
         if (preg_match('/charset="?([^";]+)"?/i', $content_type, $cm)) {
-            $charset = $cm[1];
+            $charset = trim($cm[1], "\"' \t\n\r\0\x0B");
+            if (preg_match('/^(ks_c_5601[-_]1987|ks_c_5601|ksc_5601[-_]1987|ksc_5601|euc-kr|euckr)$/i', $charset)) {
+                $charset = 'EUC-KR';
+            }
             if (strcasecmp($charset, 'utf-8') !== 0) {
                 $converted = @mb_convert_encoding($body, 'UTF-8', $charset);
                 if ($converted !== false) {
@@ -1671,13 +1677,15 @@ switch ($action) {
                                         }
                                         
                                         // Clean up stale emails in the fetched range
-                                        $min_timestamp = min(array_column($fetched_emails, 'timestamp'));
-                                        $fetched_ids = array_column($fetched_emails, 'id');
-                                        $placeholders = implode(',', array_fill(0, count($fetched_ids), '?'));
-                                        $stmt_clean = $db->prepare("DELETE FROM cached_emails 
-                                            WHERE username = ? AND folder = ? AND timestamp >= ? AND id NOT IN ($placeholders)");
-                                        $params = array_merge([$username, $ext_folder, $min_timestamp], $fetched_ids);
-                                        $stmt_clean->execute($params);
+                                        if ($force_fetch) {
+                                            $min_timestamp = min(array_column($fetched_emails, 'timestamp'));
+                                            $fetched_ids = array_column($fetched_emails, 'id');
+                                            $placeholders = implode(',', array_fill(0, count($fetched_ids), '?'));
+                                            $stmt_clean = $db->prepare("DELETE FROM cached_emails 
+                                                WHERE username = ? AND folder = ? AND timestamp >= ? AND id NOT IN ($placeholders)");
+                                            $params = array_merge([$username, $ext_folder, $min_timestamp], $fetched_ids);
+                                            $stmt_clean->execute($params);
+                                        }
                                     }
                                 }
                             }
@@ -1823,13 +1831,15 @@ switch ($action) {
                         }
                         
                         // Clean up stale emails in the fetched range
-                        $min_timestamp = min(array_column($emails, 'timestamp'));
-                        $fetched_ids = array_column($emails, 'id');
-                        $placeholders = implode(',', array_fill(0, count($fetched_ids), '?'));
-                        $stmt_clean = $db->prepare("DELETE FROM cached_emails 
-                            WHERE username = ? AND folder = ? AND timestamp >= ? AND id NOT IN ($placeholders)");
-                        $params = array_merge([$username, $folder, $min_timestamp], $fetched_ids);
-                        $stmt_clean->execute($params);
+                        if ($offset === 0) {
+                            $min_timestamp = min(array_column($emails, 'timestamp'));
+                            $fetched_ids = array_column($emails, 'id');
+                            $placeholders = implode(',', array_fill(0, count($fetched_ids), '?'));
+                            $stmt_clean = $db->prepare("DELETE FROM cached_emails 
+                                WHERE username = ? AND folder = ? AND timestamp >= ? AND id NOT IN ($placeholders)");
+                            $params = array_merge([$username, $folder, $min_timestamp], $fetched_ids);
+                            $stmt_clean->execute($params);
+                        }
                     }
                     
                     respond(true, '성공', [
@@ -4348,7 +4358,8 @@ class SimpleIMAPClient {
             if ($in_header) {
                 $len = strlen($line);
                 if ($len >= $header_bytes_left) {
-                    $header_data .= substr($line, 0, $header_bytes_left);
+                    $actual_bytes = $header_bytes_left;
+                    $header_data .= substr($line, 0, $actual_bytes);
                     $in_header = false;
                     $header_bytes_left = 0;
                     
@@ -4359,7 +4370,11 @@ class SimpleIMAPClient {
                         $current_item = null;
                     }
                     
-                    $rest = substr($line, $header_bytes_left);
+                    $rest = substr($line, $actual_bytes);
+                    if (count($emails) > 0 && preg_match('/UID (\d+)/i', $rest, $uid_m)) {
+                        $emails[count($emails) - 1]['uid'] = intval($uid_m[1]);
+                    }
+                    
                     if (preg_match('/\* (\d+) FETCH \((.+)/i', $rest, $m)) {
                         $current_item = [
                             'seq' => intval($m[1]),
@@ -4388,6 +4403,10 @@ class SimpleIMAPClient {
 
             if (strpos($line, "$tag ") === 0) {
                 break;
+            }
+            
+            if (!$in_header && !$current_item && count($emails) > 0 && preg_match('/^\s*UID (\d+)/i', $line, $uid_m)) {
+                $emails[count($emails) - 1]['uid'] = intval($uid_m[1]);
             }
 
             if (preg_match('/\* (\d+) FETCH \((.+)/i', $line, $m)) {
@@ -4434,7 +4453,7 @@ class SimpleIMAPClient {
 
         $decode = function($str) {
             if (!$str) return '';
-            return mb_decode_mimeheader($str);
+            return robust_decode_header($str);
         };
 
         $subject = isset($headers['SUBJECT']) ? $decode($headers['SUBJECT']) : '(제목 없음)';
