@@ -30,6 +30,97 @@ document.addEventListener('DOMContentLoaded', () => {
         return id.split(':2,')[0];
     }
 
+    function applyFolderVisibility() {
+        if (!state.user) return;
+        const key = 'mail-hidden-folders-' + state.user.username;
+        const hiddenFolders = JSON.parse(localStorage.getItem(key) || '{}');
+        
+        // 1. Starred, Sent, Drafts, Spam, Trash
+        const systemFolders = ['Starred', 'Sent', 'Drafts', 'Spam', 'Trash'];
+        systemFolders.forEach(folder => {
+            const isHidden = !!hiddenFolders[folder];
+            const selector = `.sidebar-nav [data-folder="${folder}"], .sidebar-nav [data-folder$="_${folder}"]`;
+            document.querySelectorAll(selector).forEach(el => {
+                if (isHidden) {
+                    el.style.setProperty('display', 'none', 'important');
+                } else {
+                    el.style.removeProperty('display');
+                }
+            });
+        });
+
+        // 2. 개인 보관함 (custom-tags)
+        const isTagsHidden = !!hiddenFolders['custom-tags'];
+        const tagsContainers = document.querySelectorAll('#tags-menu-container, [id="tags-menu-container"]');
+        tagsContainers.forEach(tagsContainer => {
+            if (isTagsHidden) {
+                tagsContainer.style.setProperty('display', 'none', 'important');
+            } else {
+                tagsContainer.style.removeProperty('display');
+            }
+        });
+
+        // 3. Custom tags/folders
+        document.querySelectorAll('#sidebar-tags-container .tag-item, #tags-popover-list .tag-item, #tags-popover-list .tags-popover-item').forEach(el => {
+            const folderName = el.dataset.folder || el.dataset.tag;
+            if (folderName && !systemFolders.includes(folderName) && folderName !== 'custom-tags' && folderName !== 'INBOX') {
+                const isHidden = !!hiddenFolders[folderName];
+                if (isHidden) {
+                    el.style.setProperty('display', 'none', 'important');
+                } else {
+                    el.style.removeProperty('display');
+                }
+            }
+        });
+        
+        // 4. If current folder is hidden, switch to default folder
+        let isCurrentHidden = false;
+        if (hiddenFolders[state.currentFolder]) {
+            isCurrentHidden = true;
+        } else if (state.currentFolder.startsWith('ext_')) {
+            const parts = state.currentFolder.split('_');
+            const sub = parts[2];
+            if (hiddenFolders[sub]) {
+                isCurrentHidden = true;
+            }
+        }
+        
+        if (isCurrentHidden) {
+            const activeAccounts = (state.externalMails || []).filter(a => a.is_active === 1);
+            const defaultFolder = activeAccounts.length > 1 ? 'unified_inbox' : 'INBOX';
+            if (state.currentFolder !== defaultFolder) {
+                setCookie('currentFolder', defaultFolder);
+                state.currentFolder = defaultFolder;
+                syncActiveFolderUI();
+                loadEmails(defaultFolder);
+            }
+        }
+    }
+
+    function toggleFolderVisibility(folderId, btnEl) {
+        if (!state.user) return;
+        const key = 'mail-hidden-folders-' + state.user.username;
+        const hiddenFolders = JSON.parse(localStorage.getItem(key) || '{}');
+        
+        let isHidden = false;
+        if (hiddenFolders[folderId]) {
+            delete hiddenFolders[folderId];
+            isHidden = false;
+        } else {
+            hiddenFolders[folderId] = true;
+            isHidden = true;
+        }
+        localStorage.setItem(key, JSON.stringify(hiddenFolders));
+        
+        if (btnEl) {
+            btnEl.classList.toggle('hidden-state', isHidden);
+            btnEl.innerHTML = isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김';
+        }
+        
+        // Apply changes
+        applyFolderVisibility();
+    }
+
     // --------------------------------------------------
     // FOLDER COLOR HELPER (Hash-based colors)
     // --------------------------------------------------
@@ -1120,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'INBOX': subLabel = '받은 편지함'; break;
                 case 'Sent': subLabel = '보낸 편지함'; break;
                 case 'Drafts': subLabel = '임시 보관함'; break;
-                case 'Spam': subLabel = '스팸 메일함'; break;
+                case 'Spam': subLabel = '스팸 보관함'; break;
                 case 'Trash': subLabel = '휴지통'; break;
             }
             return `${subLabel} (${emailLabel})`;
@@ -1130,7 +1221,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'Starred': return '즐겨찾기';
             case 'Sent': return '보낸 편지함';
             case 'Drafts': return '임시 보관함';
-            case 'Spam': return '스팸 메일함';
+            case 'Spam': return '스팸 보관함';
             case 'Trash': return '휴지통';
             default: return folder;
         }
@@ -1470,6 +1561,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Keep UI classes synchronized
                 syncActiveFolderUI();
                 renderTagsPopoverList(tags);
+                applyFolderVisibility();
             } else {
                 console.error('Failed to load tags:', res.message);
             }
@@ -3122,13 +3214,47 @@ document.addEventListener('DOMContentLoaded', () => {
             const tags = res.tags || [];
             tagsModalList.innerHTML = '';
             
-            if (tags.length === 0) {
-                tagsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center; color: var(--text-secondary);">생성된 폴더가 없습니다.</td></tr>';
-                return;
-            }
+            const systemFolders = [
+                { id: 'Starred', name: '즐겨찾기', icon: 'fa-star', color: '#f59e0b' },
+                { id: 'Sent', name: '보낸 편지함', icon: 'fa-paper-plane', color: '#10b981' },
+                { id: 'Drafts', name: '임시 보관함', icon: 'fa-file-signature', color: '#6b7280' },
+                { id: 'Spam', name: '스팸 보관함', icon: 'fa-ban', color: '#ef4444' },
+                { id: 'Trash', name: '휴지통', icon: 'fa-trash-can', color: '#ef4444' },
+                { id: 'custom-tags', name: '개인 보관함', icon: 'fa-box-archive', color: 'var(--text-secondary)' }
+            ];
+            
+            const key = 'mail-hidden-folders-' + (state.user ? state.user.username : '');
+            const hiddenFolders = JSON.parse(localStorage.getItem(key) || '{}');
+            
+            systemFolders.forEach(sys => {
+                const isHidden = !!hiddenFolders[sys.id];
+                const tr = document.createElement('tr');
+                tr.className = 'system-folder-row';
+                
+                tr.innerHTML = `
+                    <td>
+                        <i class="fa-solid ${sys.icon}" style="color: ${sys.color}; margin-right: 8px;"></i>
+                        <span class="system-folder-name-label" style="font-weight: 500;">${sys.name}</span>
+                    </td>
+                    <td style="text-align: center; white-space: nowrap;">
+                        <button class="btn-tag-visibility ${isHidden ? 'hidden-state' : ''}" data-folder="${sys.id}">
+                            ${isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김'}
+                        </button>
+                    </td>
+                `;
+                
+                tr.querySelector('.btn-tag-visibility').addEventListener('click', (e) => {
+                    const btn = e.currentTarget;
+                    const folderId = btn.dataset.folder;
+                    toggleFolderVisibility(folderId, btn);
+                });
+                
+                tagsModalList.appendChild(tr);
+            });
             
             tags.forEach(t => {
                 const tag = t.name;
+                const isHidden = !!hiddenFolders[tag];
                 const tr = document.createElement('tr');
                 tr.draggable = true;
                 tr.dataset.tag = tag;
@@ -3141,10 +3267,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         <i class="fa-solid fa-folder tag-folder-icon-clickable" style="color: ${folderColor}; margin-right: 8px; cursor: pointer;" data-tag="${escapeHtml(tag)}"></i> 
                         <span class="tag-name-label" style="cursor: pointer; border-bottom: 1px dashed var(--text-secondary);" title="클릭하여 이름 수정">${escapeHtml(tag)}</span>
                     </td>
-                    <td style="text-align: center;">
+                    <td style="text-align: center; white-space: nowrap;">
+                        <button class="btn-tag-visibility ${isHidden ? 'hidden-state' : ''}" data-folder="${escapeHtml(tag)}">
+                            ${isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김'}
+                        </button>
                         <button class="btn-tag-delete btn-danger-action" data-tag="${escapeHtml(tag)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>
                     </td>
                 `;
+                
+                tr.querySelector('.btn-tag-visibility').addEventListener('click', (e) => {
+                    const btn = e.currentTarget;
+                    const folderId = btn.dataset.folder;
+                    toggleFolderVisibility(folderId, btn);
+                });
 
                 const label = tr.querySelector('.tag-name-label');
                 label.addEventListener('click', (e) => {
@@ -3687,7 +3822,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         'INBOX': '받은 편지함',
                         'Sent': '보낸 편지함',
                         'Drafts': '임시 보관함',
-                        'Spam': '스팸 메일함',
+                        'Spam': '스팸 보관함',
                         'Trash': '휴지통'
                     };
                     return map[folderName] || folderName;
@@ -3942,7 +4077,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </a>
                 <a href="#" class="nav-item" data-folder="Spam">
                     <i class="fa-solid fa-ban"></i>
-                    <span class="nav-label">스팸 메일함</span>
+                    <span class="nav-label">스팸 보관함</span>
                     <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Trash">
@@ -4025,7 +4160,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </a>
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_Spam">
                             <i class="fa-solid fa-ban"></i>
-                            <span class="nav-label">스팸 메일함</span>
+                            <span class="nav-label">스팸 보관함</span>
                             <span class="badge" style="display:none;">0</span>
                         </a>
                         <a href="#" class="nav-item" data-folder="ext_${acc.id}_Trash">
@@ -4076,6 +4211,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.currentFolder = folderToLoad;
         }
         syncActiveFolderUI();
+        applyFolderVisibility();
     }
 
     function bindSidebarListeners() {

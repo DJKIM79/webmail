@@ -92,7 +92,7 @@
                 </a>
                 <a href="#" class="nav-item" data-folder="Spam">
                     <i class="fa-solid fa-ban"></i>
-                    <span class="nav-label">스팸 메일함</span>
+                    <span class="nav-label">스팸 보관함</span>
                     <span class="badge" style="display:none;">0</span>
                 </a>
                 <a href="#" class="nav-item" data-folder="Trash">
@@ -694,7 +694,7 @@
                         <thead>
                             <tr>
                                 <th>폴더 이름</th>
-                                <th style="width: 80px; text-align: center;">작업</th>
+                                <th style="width: 140px; text-align: center;">작업</th>
                             </tr>
                         </thead>
                         <tbody id="tags-modal-list">
