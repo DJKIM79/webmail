@@ -132,6 +132,7 @@ body {
 .sidebar-header {
     margin-bottom: 32px;
     padding-right: 24px;
+    flex-shrink: 0;
 }
 
 .logo {
@@ -170,6 +171,7 @@ body {
     transition: all var(--transition-normal);
     margin-bottom: 32px;
     margin-right: 24px;
+    flex-shrink: 0;
 }
 
 .btn-compose:hover {
@@ -2528,6 +2530,11 @@ body.theme-white .sidebar.collapsed .tags-menu-container .badge {
     display: inline-block;
 }
 
+.dropdown-attachments {
+    position: relative;
+    display: inline-block;
+}
+
 .dropdown-content {
     position: absolute;
     top: 100%;
@@ -3786,6 +3793,11 @@ body.theme-white .input-group-select select optgroup {
     min-height: 0;
     overflow: hidden;
     background: var(--bg-surface-solid) !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+.reader-body::-webkit-scrollbar {
+    display: none !important;
 }
 
 .reader-body iframe {
@@ -3796,6 +3808,11 @@ body.theme-white .input-group-select select optgroup {
     display: block;
     opacity: 0;
     transition: opacity var(--transition-fast) ease-in-out;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+.reader-body iframe::-webkit-scrollbar {
+    display: none !important;
 }
 
 /* 모바일 메일 상세 보기 스크롤 최적화 (헤더와 메일 본문 영역 통합 스크롤) */
@@ -6681,4 +6698,45 @@ body.theme-white .sidebar-group-header:hover {
         justify-content: center !important;
         padding: 8px !important;
     }
+}
+
+/* ==================================================
+ * EXTERNAL IMAGE WARNING BANNER
+ * ================================================== */
+.external-image-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: rgba(245, 158, 11, 0.12); /* transparent amber */
+    border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+    color: #f59e0b; /* amber text */
+    font-size: 13px;
+    gap: 12px;
+}
+.external-image-banner.hidden {
+    display: none !important;
+}
+.external-image-banner i {
+    font-size: 14px;
+    color: #f59e0b;
+}
+.external-image-banner span {
+    flex-grow: 1;
+    font-weight: 500;
+}
+.external-image-banner .btn-banner-action {
+    background: #f59e0b;
+    color: #ffffff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+.external-image-banner .btn-banner-action:hover {
+    background: #d97706;
 }

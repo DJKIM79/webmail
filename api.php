@@ -128,6 +128,8 @@ $db->exec("CREATE TABLE IF NOT EXISTS external_mail_accounts (
     is_active INTEGER DEFAULT 1,
     sort_order INTEGER DEFAULT 0,
     smtp_auth INTEGER DEFAULT 1,
+    external_images TEXT DEFAULT 'ask',
+    external_links TEXT DEFAULT 'ask',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )");
 
@@ -137,6 +139,30 @@ try {
 } catch (PDOException $e) {
     // Ignore error if column already exists
 }
+
+// Migrate existing external_mail_accounts for external_images
+try {
+    $db->exec("ALTER TABLE external_mail_accounts ADD COLUMN external_images TEXT DEFAULT 'ask'");
+} catch (PDOException $e) {
+    // Ignore error if column already exists
+}
+
+// Migrate existing external_mail_accounts for external_links
+try {
+    $db->exec("ALTER TABLE external_mail_accounts ADD COLUMN external_links TEXT DEFAULT 'ask'");
+} catch (PDOException $e) {
+    // Ignore error if column already exists
+}
+
+// Create table external_folders to store folder status for external accounts
+$db->exec("CREATE TABLE IF NOT EXISTS external_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    type TEXT DEFAULT 'custom',
+    is_hidden INTEGER DEFAULT 0,
+    UNIQUE(account_id, path)
+)");
 
 // Create table cached_emails
 $db->exec("CREATE TABLE IF NOT EXISTS cached_emails (
@@ -661,6 +687,11 @@ function parse_multipart(string $body, string $content_type, string &$html_body,
                 $disposition = $sub_headers['content-disposition'] ?? '';
                 $is_attachment = false;
                 $filename = '';
+                $content_id = '';
+                
+                if (isset($sub_headers['content-id'])) {
+                    $content_id = trim($sub_headers['content-id'], '<>');
+                }
                 
                 if (stripos($disposition, 'attachment') !== false) {
                     $is_attachment = true;
@@ -676,12 +707,17 @@ function parse_multipart(string $body, string $content_type, string &$html_body,
                     }
                 }
                 
+                if (!empty($content_id)) {
+                    $is_attachment = true;
+                }
+                
                 if ($is_attachment) {
                     $attachments[] = [
-                        'filename' => !empty($filename) ? $filename : 'unnamed_attachment',
+                        'filename' => !empty($filename) ? $filename : (!empty($content_id) ? $content_id : 'unnamed_attachment'),
                         'content_type' => explode(';', $sub_type)[0],
                         'data' => base64_encode($sub_body),
-                        'size' => strlen($sub_body)
+                        'size' => strlen($sub_body),
+                        'content_id' => $content_id
                     ];
                 } elseif (stripos($sub_type, 'multipart/') !== false) {
                     parse_multipart($sub_body, $sub_type, $html_body, $text_body, $attachments);
@@ -1365,8 +1401,12 @@ switch ($action) {
         $local_inbox_unread = 0;
         $starred_unread = 0;
         
+        $sync_enabled = intval($_GET['sync'] ?? 0) === 1;
+
         foreach ($folders_to_check as $f) {
-            sync_folder_cache($username, $f, $db);
+            if ($sync_enabled) {
+                sync_folder_cache($username, $f, $db);
+            }
             
             $stmt = $db->prepare("SELECT COUNT(*) FROM cached_emails WHERE username = :username AND folder = :folder AND seen = 0");
             $stmt->execute([':username' => $username, ':folder' => $f]);
@@ -1395,20 +1435,150 @@ switch ($action) {
         
         $total_unified_unread = $local_inbox_unread;
         
-        if (count($active_accounts) > 1) {
-            foreach ($active_accounts as $account) {
-                if ($account['service_type'] !== 'onto') {
-                    $ext_folder = 'ext_' . $account['id'] . '_INBOX';
-                    $counts[$ext_folder] = 1; // mock unread email
-                    $total_unified_unread += 1;
+        // Let's get all counts from cached_emails
+        $stmt_cached = $db->prepare("SELECT folder, COUNT(*) as cnt FROM cached_emails WHERE username = :username AND seen = 0 GROUP BY folder");
+        $stmt_cached->execute([':username' => $username]);
+        $cached_counts = [];
+        foreach ($stmt_cached->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $cached_counts[$row['folder']] = (int)$row['cnt'];
+        }
+
+        // Add actual external folder counts to $counts
+        foreach ($active_accounts as $account) {
+            if ($account['service_type'] !== 'onto') {
+                $stmt_folders = $db->prepare("SELECT path FROM external_folders WHERE account_id = :account_id AND is_hidden = 0");
+                $stmt_folders->execute([':account_id' => $account['id']]);
+                $paths = $stmt_folders->fetchAll(PDO::FETCH_COLUMN);
+                
+                if (empty($paths)) {
+                    $paths = ['INBOX', 'Sent', 'Drafts', 'Spam', 'Trash'];
                 }
-            }
-            if ($total_unified_unread > 0) {
-                $counts['unified_inbox'] = $total_unified_unread;
+
+                foreach ($paths as $path) {
+                    $folder_key = 'ext_' . $account['id'] . '_' . $path;
+                    if (isset($cached_counts[$folder_key])) {
+                        $counts[$folder_key] = $cached_counts[$folder_key];
+                        if ($path === 'INBOX') {
+                            $total_unified_unread += $cached_counts[$folder_key];
+                        }
+                    }
+                }
             }
         }
         
+        if ($total_unified_unread > 0) {
+            $counts['unified_inbox'] = $total_unified_unread;
+        }
+        
         respond(true, '성공', ['unread_counts' => $counts]);
+        break;
+
+    case 'sync_account_unread':
+        check_auth();
+        $username = $_SESSION['username'];
+        $account_id = intval($_GET['account_id'] ?? 0);
+        
+        $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username AND is_active = 1");
+        $stmt->execute([':id' => $account_id, ':username' => $username]);
+        $account = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$account) {
+            respond(false, '계정을 찾을 수 없거나 비활성화되었습니다.');
+        }
+        
+        if ($account['service_type'] === 'onto') {
+            respond(true, 'OnTo 계정은 로컬에서 자동 동기화됩니다.');
+            break;
+        }
+        
+        try {
+            $client = new SimpleIMAPClient();
+            $client->connect($account['imap_host'], $account['imap_port'], $account['imap_ssl'], $account['mail_username'], $account['mail_password']);
+            
+            // Get non-hidden folders of this account
+            $stmt_folders = $db->prepare("SELECT path FROM external_folders WHERE account_id = :account_id AND is_hidden = 0");
+            $stmt_folders->execute([':account_id' => $account_id]);
+            $paths = $stmt_folders->fetchAll(PDO::FETCH_COLUMN);
+            if (empty($paths)) {
+                $paths = ['INBOX', 'Sent', 'Drafts', 'Spam', 'Trash'];
+            }
+            
+            foreach ($paths as $path) {
+                $folder_key = 'ext_' . $account_id . '_' . $path;
+                try {
+                    $exists = $client->select($path);
+                    $emails = [];
+                    if ($exists > 0) {
+                        // Fetch the most recent 10 headers
+                        $start = max(1, $exists - 9);
+                        $end = $exists;
+                        $raw_emails = $client->fetch_headers_range($start, $end);
+                        foreach ($raw_emails as $raw) {
+                            $uid = isset($raw['uid']) ? $raw['uid'] : $raw['seq'];
+                            $email_id = 'ext_' . $account_id . '_' . bin2hex($path) . '_' . $uid;
+                            $emails[] = [
+                                'id' => $email_id,
+                                'from' => $raw['from'],
+                                'to' => $raw['to'],
+                                'cc' => $raw['cc'],
+                                'subject' => $raw['subject'],
+                                'snippet' => '외부 메일입니다. 클릭하여 내용을 확인하세요.',
+                                'timestamp' => isset($raw['timestamp']) ? $raw['timestamp'] : time(),
+                                'seen' => $raw['seen'],
+                                'flagged' => $raw['flagged'],
+                                'folder' => $folder_key,
+                                'account_color' => $account['color'],
+                                'account_email' => $account['email'],
+                                'account_id' => $account['id']
+                            ];
+                        }
+                    }
+                    
+                    // Cache in database
+                    if (!empty($emails)) {
+                        $stmt_ins = $db->prepare("INSERT OR REPLACE INTO cached_emails 
+                            (id, username, folder, filename, subject, `from`, `to`, cc, date, timestamp, seen, flagged, snippet, account_id, account_color, account_email) 
+                            VALUES (:id, :username, :folder, :filename, :subject, :from, :to, :cc, :date, :timestamp, :seen, :flagged, :snippet, :account_id, :account_color, :account_email)");
+                        foreach ($emails as $em) {
+                            $stmt_ins->execute([
+                                ':id' => $em['id'],
+                                ':username' => $username,
+                                ':folder' => $folder_key,
+                                ':filename' => $em['id'],
+                                ':subject' => $em['subject'],
+                                ':from' => $em['from'],
+                                ':to' => $em['to'],
+                                ':cc' => $em['cc'],
+                                ':date' => date('r', $em['timestamp']),
+                                ':timestamp' => $em['timestamp'],
+                                ':seen' => $em['seen'] ? 1 : 0,
+                                ':flagged' => $em['flagged'] ? 1 : 0,
+                                ':snippet' => $em['snippet'],
+                                ':account_id' => $account['id'],
+                                ':account_color' => $account['color'],
+                                ':account_email' => $account['email']
+                            ]);
+                        }
+                        
+                        // Clean up stale emails in the fetched range
+                        $min_timestamp = min(array_column($emails, 'timestamp'));
+                        $fetched_ids = array_column($emails, 'id');
+                        $placeholders = implode(',', array_fill(0, count($fetched_ids), '?'));
+                        $stmt_clean = $db->prepare("DELETE FROM cached_emails 
+                            WHERE username = ? AND folder = ? AND timestamp >= ? AND id NOT IN ($placeholders)");
+                        $params = array_merge([$username, $folder_key, $min_timestamp], $fetched_ids);
+                        $stmt_clean->execute($params);
+                    }
+                } catch (Exception $folder_ex) {
+                    // Ignore individual folder failure to continue with others
+                    error_log("Folder sync error for $path: " . $folder_ex->getMessage());
+                }
+            }
+            
+            $client->close();
+            respond(true, '성공');
+        } catch (Exception $e) {
+            respond(false, '동기화 실패: ' . $e->getMessage());
+        }
         break;
 
     case 'list_emails':
@@ -1427,6 +1597,98 @@ switch ($action) {
             $stmt->execute([':username' => $username]);
             $active_accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
+            // Sync external accounts if needed before loading unified inbox
+            foreach ($active_accounts as $account) {
+                if ($account['service_type'] !== 'onto') {
+                    $ext_folder = 'ext_' . $account['id'] . '_INBOX';
+                    $stmt_cnt = $db->prepare("SELECT COUNT(*) FROM cached_emails WHERE username = :username AND folder = :folder");
+                    $stmt_cnt->execute([':username' => $username, ':folder' => $ext_folder]);
+                    $cached_count = intval($stmt_cnt->fetchColumn());
+                    
+                    $force_fetch = ($offset === 0);
+                    $target_count = $offset + $limit;
+                    if ($force_fetch || $cached_count < $target_count) {
+                        try {
+                            $client = new SimpleIMAPClient();
+                            $client->connect($account['imap_host'], $account['imap_port'], $account['imap_ssl'], $account['mail_username'], $account['mail_password']);
+                            $exists = $client->select('INBOX');
+                            
+                            if ($exists > 0) {
+                                if ($force_fetch) {
+                                    $start = max(1, $exists - $limit + 1);
+                                    $end = $exists;
+                                } else {
+                                    $start = max(1, $exists - $target_count + 1);
+                                    $end = max(1, $exists - $cached_count);
+                                }
+                                
+                                if ($end >= $start) {
+                                    $raw_emails = $client->fetch_headers_range($start, $end);
+                                    $fetched_emails = [];
+                                    foreach ($raw_emails as $raw) {
+                                        $uid = isset($raw['uid']) ? $raw['uid'] : $raw['seq'];
+                                        $email_id = 'ext_' . $account['id'] . '_' . bin2hex('INBOX') . '_' . $uid;
+                                        $fetched_emails[] = [
+                                            'id' => $email_id,
+                                            'from' => $raw['from'],
+                                            'to' => $raw['to'],
+                                            'cc' => $raw['cc'],
+                                            'subject' => $raw['subject'],
+                                            'snippet' => '외부 메일입니다. 클릭하여 내용을 확인하세요.',
+                                            'timestamp' => isset($raw['timestamp']) ? $raw['timestamp'] : time(),
+                                            'seen' => $raw['seen'],
+                                            'flagged' => $raw['flagged'],
+                                            'folder' => $ext_folder,
+                                            'account_color' => $account['color'],
+                                            'account_email' => $account['email'],
+                                            'account_id' => $account['id']
+                                        ];
+                                    }
+                                    
+                                    if (!empty($fetched_emails)) {
+                                        $stmt_ins = $db->prepare("INSERT OR REPLACE INTO cached_emails 
+                                            (id, username, folder, filename, subject, `from`, `to`, cc, date, timestamp, seen, flagged, snippet, account_id, account_color, account_email) 
+                                            VALUES (:id, :username, :folder, :filename, :subject, :from, :to, :cc, :date, :timestamp, :seen, :flagged, :snippet, :account_id, :account_color, :account_email)");
+                                        foreach ($fetched_emails as $em) {
+                                            $stmt_ins->execute([
+                                                ':id' => $em['id'],
+                                                ':username' => $username,
+                                                ':folder' => $em['folder'],
+                                                ':filename' => $em['id'],
+                                                ':subject' => $em['subject'],
+                                                ':from' => $em['from'],
+                                                ':to' => $em['to'],
+                                                ':cc' => $em['cc'],
+                                                ':date' => date('r', $em['timestamp']),
+                                                ':timestamp' => $em['timestamp'],
+                                                ':seen' => $em['seen'],
+                                                ':flagged' => $em['flagged'],
+                                                ':snippet' => $em['snippet'],
+                                                ':account_id' => $em['account_id'],
+                                                ':account_color' => $em['account_color'],
+                                                ':account_email' => $em['account_email']
+                                            ]);
+                                        }
+                                        
+                                        // Clean up stale emails in the fetched range
+                                        $min_timestamp = min(array_column($fetched_emails, 'timestamp'));
+                                        $fetched_ids = array_column($fetched_emails, 'id');
+                                        $placeholders = implode(',', array_fill(0, count($fetched_ids), '?'));
+                                        $stmt_clean = $db->prepare("DELETE FROM cached_emails 
+                                            WHERE username = ? AND folder = ? AND timestamp >= ? AND id NOT IN ($placeholders)");
+                                        $params = array_merge([$username, $ext_folder, $min_timestamp], $fetched_ids);
+                                        $stmt_clean->execute($params);
+                                    }
+                                }
+                            }
+                            $client->close();
+                        } catch (Exception $e) {
+                            error_log("Failed to sync account " . $account['id'] . " for unified inbox: " . $e->getMessage());
+                        }
+                    }
+                }
+            }
+            
             $emails = [];
             foreach ($active_accounts as $account) {
                 if ($account['service_type'] === 'onto') {
@@ -1439,42 +1701,31 @@ switch ($action) {
                         $emails[] = $em;
                     }
                 } else {
-                    // Mock emails for external accounts in unified inbox
-                    $service_label = ucfirst($account['service_type']);
-                    $emails[] = [
-                        'id' => 'mock_' . $account['id'] . '_1',
-                        'from' => 'support@' . $account['service_type'] . '.com',
-                        'to' => $account['email'],
-                        'subject' => '[' . $service_label . ' 연동 안내] 외부 메일 연결이 정상 작동 중입니다.',
-                        'snippet' => '회원님의 ' . $service_label . ' 계정이 성공적으로 연동되었습니다. 이제 ' . $account['email'] . ' 메일을 OnTo에서 받아보실 수 있습니다.',
-                        'timestamp' => time() - 3600,
-                        'seen' => 1,
-                        'flagged' => 0,
-                        'folder' => 'unified_inbox',
-                        'account_color' => $account['color'],
-                        'account_email' => $account['email'],
-                        'account_id' => $account['id']
-                    ];
-                    $emails[] = [
-                        'id' => 'mock_' . $account['id'] . '_2',
-                        'from' => 'team@onto.kr',
-                        'to' => $account['email'],
-                        'subject' => '외부 메일 계정의 색상 설정 안내',
-                        'snippet' => '통합 받은 편지함에서 이 이메일 옆에 표시되는 점의 색상은 회원님이 설정한 색상(' . $account['color'] . ')입니다.',
-                        'timestamp' => time() - 7200,
-                        'seen' => 0,
-                        'flagged' => 1,
-                        'folder' => 'unified_inbox',
-                        'account_color' => $account['color'],
-                        'account_email' => $account['email'],
-                        'account_id' => $account['id']
-                    ];
+                    $ext_folder = 'ext_' . $account['id'] . '_INBOX';
+                    $stmt_ext = $db->prepare("SELECT * FROM cached_emails WHERE username = :username AND folder = :folder");
+                    $stmt_ext->execute([':username' => $username, ':folder' => $ext_folder]);
+                    $ext_emails = $stmt_ext->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($ext_emails as $em) {
+                        $em['seen'] = (int)$em['seen'];
+                        $em['flagged'] = (int)$em['flagged'];
+                        $em['account_color'] = $account['color'];
+                        $em['account_email'] = $account['email'];
+                        $em['account_id'] = $account['id'];
+                        $emails[] = $em;
+                    }
                 }
             }
             
             usort($emails, fn($a, $b) => $b['timestamp'] - $a['timestamp']);
-            $total = count($emails);
+            
             $slice = array_slice($emails, $offset, $limit);
+            
+            // Calculate total dynamically to support infinite scroll without loading all messages
+            if (count($slice) === $limit) {
+                $total = $offset + $limit + 1; // Indicate there is more
+            } else {
+                $total = $offset + count($slice); // Reached the end
+            }
             
             // Save senders to auto_senders table
             $auto_senders_to_save = [];
@@ -1504,41 +1755,92 @@ switch ($action) {
             if ($account['service_type'] === 'onto') {
                 $folder = $sub_folder; // Fallback to local files below
             } else {
-                $service_label = ucfirst($account['service_type']);
-                $emails = [];
-                if ($sub_folder === 'INBOX') {
-                    $emails[] = [
-                        'id' => 'mock_' . $account['id'] . '_1',
-                        'from' => 'support@' . $account['service_type'] . '.com',
-                        'to' => $account['email'],
-                        'subject' => '[' . $service_label . ' 연동 안내] 외부 메일 연결이 정상 작동 중입니다.',
-                        'snippet' => '회원님의 ' . $service_label . ' 계정이 성공적으로 연동되었습니다. 이제 ' . $account['email'] . ' 메일을 OnTo에서 받아보실 수 있습니다.',
-                        'timestamp' => time() - 3600,
-                        'seen' => 1,
-                        'flagged' => 0,
-                        'folder' => $folder,
-                        'account_color' => $account['color'],
-                        'account_email' => $account['email'],
-                        'account_id' => $account['id']
-                    ];
-                    $emails[] = [
-                        'id' => 'mock_' . $account['id'] . '_2',
-                        'from' => 'team@onto.kr',
-                        'to' => $account['email'],
-                        'subject' => '외부 메일 계정의 색상 설정 안내',
-                        'snippet' => '통합 받은 편지함에서 이 이메일 옆에 표시되는 점의 색상은 회원님이 설정한 색상(' . $account['color'] . ')입니다.',
-                        'timestamp' => time() - 7200,
-                        'seen' => 0,
-                        'flagged' => 1,
-                        'folder' => $folder,
-                        'account_color' => $account['color'],
-                        'account_email' => $account['email'],
-                        'account_id' => $account['id']
-                    ];
+                try {
+                    $client = new SimpleIMAPClient();
+                    $client->connect($account['imap_host'], $account['imap_port'], $account['imap_ssl'], $account['mail_username'], $account['mail_password']);
+                    $exists = $client->select($sub_folder);
+                    
+                    $emails = [];
+                    if ($exists > 0) {
+                        $start = max(1, $exists - $offset - $limit + 1);
+                        $end = max(1, $exists - $offset);
+                        
+                        if ($end >= $start) {
+                            $raw_emails = $client->fetch_headers_range($start, $end);
+                            foreach ($raw_emails as $raw) {
+                                $uid = isset($raw['uid']) ? $raw['uid'] : $raw['seq'];
+                                $email_id = 'ext_' . $account_id . '_' . bin2hex($sub_folder) . '_' . $uid;
+                                
+                                $emails[] = [
+                                    'id' => $email_id,
+                                    'from' => $raw['from'],
+                                    'to' => $raw['to'],
+                                    'cc' => $raw['cc'],
+                                    'subject' => $raw['subject'],
+                                    'snippet' => '외부 메일입니다. 클릭하여 내용을 확인하세요.',
+                                    'timestamp' => isset($raw['timestamp']) ? $raw['timestamp'] : time(),
+                                    'seen' => $raw['seen'],
+                                    'flagged' => $raw['flagged'],
+                                    'folder' => $folder,
+                                    'account_color' => $account['color'],
+                                    'account_email' => $account['email'],
+                                    'account_id' => $account['id']
+                                ];
+                            }
+                            
+                            // Sort DESC by timestamp
+                            usort($emails, fn($a, $b) => $b['timestamp'] - $a['timestamp']);
+                        }
+                    }
+                    
+                    $client->close();
+                    
+                    // Cache in database
+                    if (!empty($emails)) {
+                        $stmt_ins = $db->prepare("INSERT OR REPLACE INTO cached_emails 
+                            (id, username, folder, filename, subject, `from`, `to`, cc, date, timestamp, seen, flagged, snippet, account_id, account_color, account_email) 
+                            VALUES (:id, :username, :folder, :filename, :subject, :from, :to, :cc, :date, :timestamp, :seen, :flagged, :snippet, :account_id, :account_color, :account_email)");
+                        
+                        foreach ($emails as $em) {
+                            $stmt_ins->execute([
+                                ':id' => $em['id'],
+                                ':username' => $username,
+                                ':folder' => $folder,
+                                ':filename' => $em['id'],
+                                ':subject' => $em['subject'],
+                                ':from' => $em['from'],
+                                ':to' => $em['to'],
+                                ':cc' => $em['cc'],
+                                ':date' => date('r', $em['timestamp']),
+                                ':timestamp' => $em['timestamp'],
+                                ':seen' => $em['seen'],
+                                ':flagged' => $em['flagged'],
+                                ':snippet' => $em['snippet'],
+                                ':account_id' => $account['id'],
+                                ':account_color' => $account['color'],
+                                ':account_email' => $account['email']
+                            ]);
+                        }
+                        
+                        // Clean up stale emails in the fetched range
+                        $min_timestamp = min(array_column($emails, 'timestamp'));
+                        $fetched_ids = array_column($emails, 'id');
+                        $placeholders = implode(',', array_fill(0, count($fetched_ids), '?'));
+                        $stmt_clean = $db->prepare("DELETE FROM cached_emails 
+                            WHERE username = ? AND folder = ? AND timestamp >= ? AND id NOT IN ($placeholders)");
+                        $params = array_merge([$username, $folder, $min_timestamp], $fetched_ids);
+                        $stmt_clean->execute($params);
+                    }
+                    
+                    respond(true, '성공', [
+                        'emails' => $emails,
+                        'total' => $exists,
+                        'offset' => $offset,
+                        'limit' => $limit
+                    ]);
+                } catch (Exception $e) {
+                    respond(false, '외부 메일을 불러오지 못했습니다: ' . $e->getMessage());
                 }
-                $total = count($emails);
-                $slice = array_slice($emails, $offset, $limit);
-                respond(true, '성공', ['emails' => $slice, 'total' => $total, 'offset' => $offset, 'limit' => $limit]);
                 break;
             }
         }
@@ -1610,6 +1912,53 @@ switch ($action) {
 
         if (empty($email_id)) {
             respond(false, '이메일 ID가 누락되었습니다.');
+        }
+
+        // Check for actual external email ID
+        if (preg_match('/^ext_(\d+)_(.+)_(\d+)$/', $email_id, $matches)) {
+            $account_id = intval($matches[1]);
+            $sub_folder_hex = $matches[2];
+            $uid = intval($matches[3]);
+            $sub_folder = hex2bin($sub_folder_hex);
+            
+            $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username AND is_active = 1");
+            $stmt->execute([':id' => $account_id, ':username' => $username]);
+            $account = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$account) {
+                respond(false, '계정을 찾을 수 없거나 비활성화되었습니다.');
+            }
+            
+            try {
+                $client = new SimpleIMAPClient();
+                $client->connect($account['imap_host'], $account['imap_port'], $account['imap_ssl'], $account['mail_username'], $account['mail_password']);
+                $client->select($sub_folder);
+                
+                $raw_content = $client->fetch_body($uid);
+                try {
+                    $client->mark_as_seen($uid);
+                } catch (Exception $store_ex) {
+                    error_log("Failed to store seen flag for external mail $uid: " . $store_ex->getMessage());
+                }
+                $client->close();
+                
+                if ($raw_content) {
+                    $email = parse_email_from_content($raw_content, $email_id, $folder);
+                    if ($email) {
+                        // Mark email as seen in database
+                        $stmt_seen = $db->prepare("UPDATE cached_emails SET seen = 1 WHERE id = :id");
+                        $stmt_seen->execute([':id' => $email_id]);
+                        $email['seen'] = 1;
+                        respond(true, '성공', ['email' => $email]);
+                    } else {
+                        respond(false, '이메일 분석 실패.');
+                    }
+                } else {
+                    respond(false, '이메일을 가져오지 못했습니다.');
+                }
+            } catch (Exception $e) {
+                respond(false, 'IMAP 메일을 읽지 못했습니다: ' . $e->getMessage());
+            }
+            break;
         }
 
         // Intercept mock emails
@@ -2681,7 +3030,105 @@ switch ($action) {
         $stmt->execute([':username' => $username]);
         $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
+        // Fetch folders for each account
+        $stmt_folders = $db->prepare("SELECT path, type, is_hidden FROM external_folders WHERE account_id = :account_id");
+        foreach ($accounts as &$acc) {
+            $stmt_folders->execute([':account_id' => $acc['id']]);
+            $folders = $stmt_folders->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($folders as &$f) {
+                $f['display_name'] = imap_utf7_to_utf8($f['path']);
+            }
+            $acc['folders'] = $folders;
+        }
+        
         respond(true, '성공', ['accounts' => $accounts]);
+        break;
+
+    case 'list_external_folders':
+        check_auth();
+        $username = $_SESSION['username'];
+        $account_id = intval($_GET['account_id'] ?? 0);
+
+        $stmt = $db->prepare("SELECT * FROM external_mail_accounts WHERE id = :id AND username = :username");
+        $stmt->execute([':id' => $account_id, ':username' => $username]);
+        $account = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$account) {
+            respond(false, '계정을 찾을 수 없습니다.');
+        }
+
+        try {
+            $client = new SimpleIMAPClient();
+            $client->connect($account['imap_host'], $account['imap_port'], $account['imap_ssl'], $account['mail_username'], $account['mail_password']);
+            $imap_folders = $client->get_folders();
+            $client->close();
+
+            $stmt_sel = $db->prepare("SELECT * FROM external_folders WHERE account_id = :account_id");
+            $stmt_sel->execute([':account_id' => $account_id]);
+            $existing_rows = $stmt_sel->fetchAll(PDO::FETCH_ASSOC);
+            
+            $existing_map = [];
+            foreach ($existing_rows as $row) {
+                $existing_map[$row['path']] = $row;
+            }
+
+            $stmt_ins = $db->prepare("INSERT INTO external_folders (account_id, path, type, is_hidden) VALUES (:account_id, :path, :type, 0)");
+            
+            $result_folders = [];
+            foreach ($imap_folders as $f) {
+                if (!isset($existing_map[$f['path']])) {
+                    $stmt_ins->execute([
+                        ':account_id' => $account_id,
+                        ':path' => $f['path'],
+                        ':type' => $f['type']
+                    ]);
+                    $f['is_hidden'] = 0;
+                } else {
+                    $f['is_hidden'] = intval($existing_map[$f['path']]['is_hidden']);
+                    if ($existing_map[$f['path']]['type'] !== $f['type']) {
+                        $stmt_upd_type = $db->prepare("UPDATE external_folders SET type = :type WHERE account_id = :account_id AND path = :path");
+                        $stmt_upd_type->execute([
+                            ':type' => $f['type'],
+                            ':account_id' => $account_id,
+                            ':path' => $f['path']
+                        ]);
+                    }
+                }
+                $f['display_name'] = imap_utf7_to_utf8($f['path']);
+                $result_folders[] = $f;
+            }
+
+            respond(true, '성공', ['folders' => $result_folders]);
+        } catch (Exception $e) {
+            respond(false, 'IMAP 폴더 목록을 가져오지 못했습니다: ' . $e->getMessage());
+        }
+        break;
+
+    case 'update_external_folder_settings':
+        check_auth();
+        $username = $_SESSION['username'];
+        $account_id = intval($_POST['account_id'] ?? 0);
+        $folder_path = trim($_POST['folder_path'] ?? '');
+        $is_hidden = intval($_POST['is_hidden'] ?? 0);
+
+        if (empty($folder_path)) {
+            respond(false, '폴더 경로가 누락되었습니다.');
+        }
+
+        $stmt = $db->prepare("SELECT COUNT(*) FROM external_mail_accounts WHERE id = :id AND username = :username");
+        $stmt->execute([':id' => $account_id, ':username' => $username]);
+        if ($stmt->fetchColumn() == 0) {
+            respond(false, '권한이 없습니다.');
+        }
+
+        $stmt = $db->prepare("INSERT INTO external_folders (account_id, path, is_hidden) VALUES (:account_id, :path, :is_hidden)
+            ON CONFLICT(account_id, path) DO UPDATE SET is_hidden = :is_hidden");
+        $stmt->execute([
+            ':account_id' => $account_id,
+            ':path' => $folder_path,
+            ':is_hidden' => $is_hidden
+        ]);
+
+        respond(true, '설정이 저장되었습니다.');
         break;
 
     case 'save_external_mail':
@@ -2701,6 +3148,14 @@ switch ($action) {
         $color = $_POST['color'] ?? '#3b82f6';
         $is_active = intval($_POST['is_active'] ?? 1);
         $smtp_auth = intval($_POST['smtp_auth'] ?? 1);
+        $external_images = $_POST['external_images'] ?? 'ask';
+        if (!in_array($external_images, ['allow', 'ask', 'deny'])) {
+            $external_images = 'ask';
+        }
+        $external_links = $_POST['external_links'] ?? 'ask';
+        if (!in_array($external_links, ['allow', 'ask', 'deny'])) {
+            $external_links = 'ask';
+        }
 
         if (empty($email) || empty($mail_username)) {
             respond(false, '이메일 주소와 로그인 계정을 입력해주세요.');
@@ -2714,10 +3169,12 @@ switch ($action) {
                 respond(false, '해당 계정을 찾을 수 없습니다.');
             }
             if ($existing['service_type'] === 'onto') {
-                $stmt = $db->prepare("UPDATE external_mail_accounts SET is_active = :is_active, color = :color WHERE id = :id");
+                $stmt = $db->prepare("UPDATE external_mail_accounts SET is_active = :is_active, color = :color, external_images = :external_images, external_links = :external_links WHERE id = :id");
                 $stmt->execute([
                     ':is_active' => $is_active,
                     ':color' => $color,
+                    ':external_images' => $external_images,
+                    ':external_links' => $external_links,
                     ':id' => $id
                 ]);
                 respond(true, 'OnTo 메일 설정이 업데이트되었습니다.');
@@ -2727,6 +3184,26 @@ switch ($action) {
 
         if ($id === '' && empty($mail_password)) {
             respond(false, '암호를 입력해주세요.');
+        }
+
+        // Test connection before saving
+        $test_password = $mail_password;
+        if ($id !== '') {
+            if ($test_password === '') {
+                $test_password = $existing['mail_password'];
+            }
+        }
+        
+        if ($service_type !== 'onto') {
+            $imap_test = test_imap_connection($imap_host, $imap_port, $imap_ssl, $mail_username, $test_password);
+            if ($imap_test !== true) {
+                respond(false, '수신(IMAP) 서버 로그인 실패: ' . $imap_test, ['error_type' => 'imap']);
+            }
+            
+            $smtp_test = test_smtp_connection($smtp_host, $smtp_port, $smtp_ssl, $mail_username, $test_password, $smtp_auth);
+            if ($smtp_test !== true) {
+                respond(false, '송신(SMTP) 서버 로그인 실패: ' . $smtp_test, ['error_type' => 'smtp']);
+            }
         }
 
         if ($id === '') {
@@ -2742,8 +3219,8 @@ switch ($action) {
             $next_order = $max_order !== null ? intval($max_order) + 1 : 0;
 
             $stmt = $db->prepare("INSERT INTO external_mail_accounts 
-                (username, email, service_type, imap_host, imap_port, imap_ssl, smtp_host, smtp_port, smtp_ssl, mail_username, mail_password, color, is_active, sort_order, smtp_auth) 
-                VALUES (:username, :email, :service_type, :imap_host, :imap_port, :imap_ssl, :smtp_host, :smtp_port, :smtp_ssl, :mail_username, :mail_password, :color, :is_active, :sort_order, :smtp_auth)");
+                (username, email, service_type, imap_host, imap_port, imap_ssl, smtp_host, smtp_port, smtp_ssl, mail_username, mail_password, color, is_active, sort_order, smtp_auth, external_images, external_links) 
+                VALUES (:username, :email, :service_type, :imap_host, :imap_port, :imap_ssl, :smtp_host, :smtp_port, :smtp_ssl, :mail_username, :mail_password, :color, :is_active, :sort_order, :smtp_auth, :external_images, :external_links)");
             $stmt->execute([
                 ':username' => $username,
                 ':email' => $email,
@@ -2759,7 +3236,9 @@ switch ($action) {
                 ':color' => $color,
                 ':is_active' => $is_active,
                 ':sort_order' => $next_order,
-                ':smtp_auth' => $smtp_auth
+                ':smtp_auth' => $smtp_auth,
+                ':external_images' => $external_images,
+                ':external_links' => $external_links
             ]);
             respond(true, '외부 메일 계정이 추가되었습니다.');
         } else {
@@ -2767,7 +3246,7 @@ switch ($action) {
                 $stmt = $db->prepare("UPDATE external_mail_accounts SET 
                     email = :email, service_type = :service_type, imap_host = :imap_host, imap_port = :imap_port, imap_ssl = :imap_ssl,
                     smtp_host = :smtp_host, smtp_port = :smtp_port, smtp_ssl = :smtp_ssl, mail_username = :mail_username, mail_password = :mail_password,
-                    color = :color, is_active = :is_active, smtp_auth = :smtp_auth WHERE id = :id AND username = :username");
+                    color = :color, is_active = :is_active, smtp_auth = :smtp_auth, external_images = :external_images, external_links = :external_links WHERE id = :id AND username = :username");
                 $stmt->execute([
                     ':email' => $email,
                     ':service_type' => $service_type,
@@ -2782,6 +3261,8 @@ switch ($action) {
                     ':color' => $color,
                     ':is_active' => $is_active,
                     ':smtp_auth' => $smtp_auth,
+                    ':external_images' => $external_images,
+                    ':external_links' => $external_links,
                     ':id' => $id,
                     ':username' => $username
                 ]);
@@ -2789,7 +3270,7 @@ switch ($action) {
                 $stmt = $db->prepare("UPDATE external_mail_accounts SET 
                     email = :email, service_type = :service_type, imap_host = :imap_host, imap_port = :imap_port, imap_ssl = :imap_ssl,
                     smtp_host = :smtp_host, smtp_port = :smtp_port, smtp_ssl = :smtp_ssl, mail_username = :mail_username,
-                    color = :color, is_active = :is_active, smtp_auth = :smtp_auth WHERE id = :id AND username = :username");
+                    color = :color, is_active = :is_active, smtp_auth = :smtp_auth, external_images = :external_images, external_links = :external_links WHERE id = :id AND username = :username");
                 $stmt->execute([
                     ':email' => $email,
                     ':service_type' => $service_type,
@@ -2803,6 +3284,8 @@ switch ($action) {
                     ':color' => $color,
                     ':is_active' => $is_active,
                     ':smtp_auth' => $smtp_auth,
+                    ':external_images' => $external_images,
+                    ':external_links' => $external_links,
                     ':id' => $id,
                     ':username' => $username
                 ]);
@@ -3603,5 +4086,426 @@ function get_received_senders(string $username, PDO $db): array {
     }
     
     return array_values($senders);
+}
+
+function test_smtp_connection($smtp_host, $smtp_port, $smtp_ssl, $smtp_user, $smtp_pass, $smtp_auth) {
+    $err_str = ''; $err_no = 0;
+    $sock = ($smtp_ssl === 'ssl')
+        ? @fsockopen("ssl://$smtp_host", $smtp_port, $err_no, $err_str, 10)
+        : @fsockopen($smtp_host, $smtp_port, $err_no, $err_str, 10);
+    if (!$sock) {
+        return "SMTP 연결 실패: $err_str ($err_no)";
+    }
+
+    $rd = function() use ($sock) {
+        $d = '';
+        while ($l = fgets($sock, 512)) { 
+            $d .= $l; 
+            if (isset($l[3]) && $l[3] === ' ') break; 
+        }
+        return $d;
+    };
+    $sd = function(string $c) use ($sock, $rd) { 
+        fwrite($sock, $c . "\r\n"); 
+        return $rd(); 
+    };
+
+    $rd();
+    $ehlo = gethostname() ?: 'localhost';
+    $r = $sd("EHLO $ehlo");
+
+    if ($smtp_ssl === 'tls') {
+        $r = $sd("STARTTLS");
+        if (substr(trim($r), 0, 3) !== '220') {
+            fclose($sock);
+            return "SMTP STARTTLS 시작 실패: " . trim($r);
+        }
+        stream_socket_enable_crypto($sock, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        $r = $sd("EHLO $ehlo");
+    }
+
+    if ($smtp_auth && !empty($smtp_user)) {
+        $r = $sd("AUTH LOGIN");
+        if (substr(trim($r), 0, 3) !== '334') {
+            fclose($sock);
+            return "SMTP 인증 요청 실패: " . trim($r);
+        }
+        $r = $sd(base64_encode($smtp_user));
+        if (substr(trim($r), 0, 3) !== '334') {
+            fclose($sock);
+            return "SMTP 사용자명 전송 실패: " . trim($r);
+        }
+        $r = $sd(base64_encode($smtp_pass));
+        if (substr(trim($r), 0, 3) !== '235') {
+            fclose($sock);
+            return "SMTP 비밀번호 인증 실패: " . trim($r);
+        }
+    }
+
+    $sd("QUIT");
+    fclose($sock);
+    return true;
+}
+
+function test_imap_connection($host, $port, $ssl, $user, $pass) {
+    $err_str = ''; $err_no = 0;
+    $sock = ($ssl === 'ssl')
+        ? @fsockopen("ssl://$host", $port, $err_no, $err_str, 10)
+        : @fsockopen($host, $port, $err_no, $err_str, 10);
+    if (!$sock) {
+        return "IMAP 연결 실패: $err_str ($err_no)";
+    }
+
+    $rd = function() use ($sock) {
+        return fgets($sock, 1024);
+    };
+
+    $rd(); // greeting
+
+    if ($ssl === 'tls') {
+        fwrite($sock, "A001 STARTTLS\r\n");
+        $r = $rd();
+        if (strpos(strtoupper($r), 'A001 OK') === false) {
+            fclose($sock);
+            return "IMAP STARTTLS 실패: " . trim($r);
+        }
+        stream_socket_enable_crypto($sock, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+    }
+
+    $user_escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $user);
+    $pass_escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $pass);
+    fwrite($sock, "A002 LOGIN \"$user_escaped\" \"$pass_escaped\"\r\n");
+    
+    $login_ok = false;
+    $error_msg = 'IMAP 로그인 실패';
+    while ($line = fgets($sock, 1024)) {
+        if (strpos($line, 'A002 OK') !== false) {
+            $login_ok = true;
+            break;
+        } elseif (strpos($line, 'A002 NO') !== false || strpos($line, 'A002 BAD') !== false) {
+            $error_msg = trim($line);
+            break;
+        }
+    }
+
+    if (!$login_ok) {
+        fclose($sock);
+        return $error_msg;
+    }
+
+    fwrite($sock, "A003 LOGOUT\r\n");
+    fclose($sock);
+    return true;
+}
+
+function imap_utf7_to_utf8($str) {
+    $result = '';
+    $len = strlen($str);
+    for ($i = 0; $i < $len; $i++) {
+        $c = $str[$i];
+        if ($c === '&') {
+            if ($i + 1 < $len && $str[$i + 1] === '-') {
+                $result .= '&';
+                $i++;
+            } else {
+                $end = strpos($str, '-', $i + 1);
+                if ($end === false) {
+                    $base64 = substr($str, $i + 1);
+                    $i = $len;
+                } else {
+                    $base64 = substr($str, $i + 1, $end - $i - 1);
+                    $i = $end;
+                }
+                $base64_std = str_replace(',', '/', $base64);
+                $pad = strlen($base64_std) % 4;
+                if ($pad) {
+                    $base64_std .= str_repeat('=', 4 - $pad);
+                }
+                $decoded = base64_decode($base64_std);
+                if ($decoded !== false) {
+                    $utf8 = mb_convert_encoding($decoded, 'UTF-8', 'UTF-16BE');
+                    if ($utf8 !== false) {
+                        $result .= $utf8;
+                    } else {
+                        $utf8 = iconv('UTF-16BE', 'UTF-8', $decoded);
+                        if ($utf8 !== false) {
+                            $result .= $utf8;
+                        }
+                    }
+                }
+            }
+        } else {
+            $result .= $c;
+        }
+    }
+    return $result;
+}
+
+class SimpleIMAPClient {
+    private $sock;
+    private $tag_count = 1;
+
+    public function connect($host, $port, $ssl, $user, $pass) {
+        $err_str = ''; $err_no = 0;
+        $this->sock = ($ssl === 'ssl')
+            ? @fsockopen("ssl://$host", $port, $err_no, $err_str, 15)
+            : @fsockopen($host, $port, $err_no, $err_str, 15);
+        if (!$this->sock) {
+            throw new Exception("IMAP 연결 실패: $err_str ($err_no)");
+        }
+
+        fgets($this->sock, 1024); // greeting
+
+        if ($ssl === 'tls') {
+            $r = $this->send_cmd("STARTTLS");
+            if (strpos(strtoupper($r), 'OK') === false) {
+                throw new Exception("IMAP STARTTLS 실패: $r");
+            }
+            stream_socket_enable_crypto($this->sock, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        }
+
+        $user_escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $user);
+        $pass_escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $pass);
+        $r = $this->send_cmd("LOGIN \"$user_escaped\" \"$pass_escaped\"");
+        if (strpos(strtoupper($r), 'OK') === false) {
+            throw new Exception("IMAP 로그인 실패: " . trim($r));
+        }
+    }
+
+    private function send_cmd($cmd_text) {
+        $tag = sprintf("A%03d", $this->tag_count++);
+        fwrite($this->sock, "$tag $cmd_text\r\n");
+        $response = '';
+        while ($line = fgets($this->sock, 4096)) {
+            $response .= $line;
+            if (strpos($line, "$tag ") === 0) {
+                break;
+            }
+        }
+        return $response;
+    }
+
+    public function select($folder) {
+        $folder_escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $folder);
+        $r = $this->send_cmd("SELECT \"$folder_escaped\"");
+        if (strpos(strtoupper($r), 'OK') === false) {
+            throw new Exception("IMAP 폴더 선택 실패: " . trim($r));
+        }
+        
+        $exists = 0;
+        if (preg_match('/\* (\d+) EXISTS/i', $r, $m)) {
+            $exists = intval($m[1]);
+        }
+        return $exists;
+    }
+
+    public function get_folders() {
+        $r = $this->send_cmd('LIST "" "*"');
+        $folders = [];
+        $lines = explode("\n", $r);
+        foreach ($lines as $line) {
+            if (preg_match('/\* LIST \((.*?)\) ".*?" (.+)$/i', $line, $m)) {
+                $attrs = explode(' ', str_replace('\\', '', $m[1]));
+                $path = trim($m[2], " \r\n\"");
+                
+                $decoded_path = imap_utf7_to_utf8($path);
+                
+                $type = 'custom';
+                $lower_path = mb_strtolower($decoded_path, 'UTF-8');
+                if ($lower_path === 'inbox') {
+                    $type = 'inbox';
+                } elseif ($lower_path === 'sent' || strpos($lower_path, 'sent') !== false || strpos($lower_path, '보낸') !== false) {
+                    $type = 'sent';
+                } elseif ($lower_path === 'trash' || strpos($lower_path, 'trash') !== false || strpos($lower_path, '휴지통') !== false || strpos($lower_path, '삭제') !== false) {
+                    $type = 'trash';
+                } elseif ($lower_path === 'drafts' || strpos($lower_path, 'drafts') !== false || strpos($lower_path, '임시') !== false) {
+                    $type = 'drafts';
+                } elseif ($lower_path === 'spam' || strpos($lower_path, 'spam') !== false || strpos($lower_path, '스팸') !== false || strpos($lower_path, 'junk') !== false) {
+                    $type = 'spam';
+                }
+
+                $folders[] = [
+                    'path' => $path,
+                    'type' => $type,
+                    'is_hidden' => 0
+                ];
+            }
+        }
+        return $folders;
+    }
+
+    public function fetch_headers_range($start, $end) {
+        $tag = sprintf("A%03d", $this->tag_count++);
+        fwrite($this->sock, "$tag FETCH $start:$end (FLAGS RFC822.SIZE INTERNALDATE UID BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO CC DATE)])\r\n");
+        
+        $emails = [];
+        $current_item = null;
+        $in_header = false;
+        $header_data = '';
+        $header_bytes_left = 0;
+
+        while ($line = fgets($this->sock, 8192)) {
+            if ($in_header) {
+                $len = strlen($line);
+                if ($len >= $header_bytes_left) {
+                    $header_data .= substr($line, 0, $header_bytes_left);
+                    $in_header = false;
+                    $header_bytes_left = 0;
+                    
+                    if ($current_item) {
+                        $parsed = $this->parse_headers($header_data);
+                        $current_item = array_merge($current_item, $parsed);
+                        $emails[] = $current_item;
+                        $current_item = null;
+                    }
+                    
+                    $rest = substr($line, $header_bytes_left);
+                    if (preg_match('/\* (\d+) FETCH \((.+)/i', $rest, $m)) {
+                        $current_item = [
+                            'seq' => intval($m[1]),
+                            'uid' => intval($m[1]),
+                            'seen' => (strpos(strtolower($m[2]), '\\seen') !== false) ? 1 : 0,
+                            'flagged' => (strpos(strtolower($m[2]), '\\flagged') !== false) ? 1 : 0,
+                        ];
+                        if (preg_match('/UID (\d+)/i', $rest, $uid_m)) {
+                            $current_item['uid'] = intval($uid_m[1]);
+                        }
+                        if (preg_match('/INTERNALDATE "([^"]+)"/i', $rest, $date_m)) {
+                            $current_item['timestamp'] = strtotime($date_m[1]);
+                        }
+                        if (preg_match('/BODY\[HEADER\.FIELDS.*?\] \{(\d+)\}/i', $rest, $bytes_m)) {
+                            $header_bytes_left = intval($bytes_m[1]);
+                            $in_header = true;
+                            $header_data = '';
+                        }
+                    }
+                } else {
+                    $header_data .= $line;
+                    $header_bytes_left -= $len;
+                }
+                continue;
+            }
+
+            if (strpos($line, "$tag ") === 0) {
+                break;
+            }
+
+            if (preg_match('/\* (\d+) FETCH \((.+)/i', $line, $m)) {
+                $current_item = [
+                    'seq' => intval($m[1]),
+                    'uid' => intval($m[1]),
+                    'seen' => (strpos(strtolower($m[2]), '\\seen') !== false) ? 1 : 0,
+                    'flagged' => (strpos(strtolower($m[2]), '\\flagged') !== false) ? 1 : 0,
+                ];
+                if (preg_match('/UID (\d+)/i', $line, $uid_m)) {
+                    $current_item['uid'] = intval($uid_m[1]);
+                }
+                if (preg_match('/INTERNALDATE "([^"]+)"/i', $line, $date_m)) {
+                    $current_item['timestamp'] = strtotime($date_m[1]);
+                }
+                if (preg_match('/BODY\[HEADER\.FIELDS.*?\] \{(\d+)\}/i', $line, $bytes_m)) {
+                    $header_bytes_left = intval($bytes_m[1]);
+                    $in_header = true;
+                    $header_data = '';
+                }
+            }
+        }
+        return $emails;
+    }
+
+    private function parse_headers($header_text) {
+        $headers = [];
+        $lines = explode("\n", str_replace("\r", "", $header_text));
+        $current_field = '';
+        foreach ($lines as $line) {
+            if (empty($line)) continue;
+            if ($line[0] === ' ' || $line[0] === "\t") {
+                if ($current_field) {
+                    $headers[$current_field] .= ' ' . trim($line);
+                }
+            } else {
+                $parts = explode(':', $line, 2);
+                if (count($parts) === 2) {
+                    $current_field = strtoupper(trim($parts[0]));
+                    $headers[$current_field] = trim($parts[1]);
+                }
+            }
+        }
+
+        $decode = function($str) {
+            if (!$str) return '';
+            return mb_decode_mimeheader($str);
+        };
+
+        $subject = isset($headers['SUBJECT']) ? $decode($headers['SUBJECT']) : '(제목 없음)';
+        $from = isset($headers['FROM']) ? $decode($headers['FROM']) : '';
+        $to = isset($headers['TO']) ? $decode($headers['TO']) : '';
+        $cc = isset($headers['CC']) ? $decode($headers['CC']) : '';
+        $date = isset($headers['DATE']) ? $headers['DATE'] : '';
+
+        return [
+            'subject' => $subject,
+            'from' => $from,
+            'to' => $to,
+            'cc' => $cc,
+            'date' => $date
+        ];
+    }
+
+    public function fetch_body($uid) {
+        $tag = sprintf("A%03d", $this->tag_count++);
+        // Using BODY[] instead of BODY.PEEK[] so it gets automatically marked as read on server!
+        fwrite($this->sock, "$tag UID FETCH $uid BODY[]\r\n");
+        $body = '';
+        $bytes_left = 0;
+        $in_body = false;
+
+        while ($line = fgets($this->sock, 16384)) {
+            if ($in_body) {
+                $len = strlen($line);
+                if ($len >= $bytes_left) {
+                    $body .= substr($line, 0, $bytes_left);
+                    break;
+                } else {
+                    $body .= $line;
+                    $bytes_left -= $len;
+                }
+                continue;
+            }
+            if (preg_match('/BODY\[\] \{(\d+)\}/i', $line, $m) || preg_match('/\* \d+ FETCH \(BODY\[\] \{(\d+)\}/i', $line, $m) || preg_match('/\* \d+ FETCH \(UID \d+ BODY\[\] \{(\d+)\}/i', $line, $m)) {
+                $bytes_left = intval($m[1]);
+                $in_body = true;
+            }
+        }
+        
+        while ($line = fgets($this->sock, 4096)) {
+            if (strpos($line, "$tag ") === 0) {
+                break;
+            }
+        }
+
+        return $body;
+    }
+
+    public function mark_as_seen($uid) {
+        $tag = sprintf("A%03d", $this->tag_count++);
+        fwrite($this->sock, "$tag UID STORE $uid +FLAGS (\\Seen)\r\n");
+        $response = '';
+        while ($line = fgets($this->sock, 4096)) {
+            $response .= $line;
+            if (strpos($line, "$tag ") === 0) {
+                break;
+            }
+        }
+        return $response;
+    }
+
+    public function close() {
+        if ($this->sock) {
+            $this->send_cmd("LOGOUT");
+            fclose($this->sock);
+            $this->sock = null;
+        }
+    }
 }
 

@@ -204,13 +204,27 @@
                                 </div>
                             </div>
                             <button id="btn-delete-mail" class="btn-action btn-danger-action"><i class="fa-solid fa-trash"></i> <span>삭제</span></button>
-                        </div>
-                        <div id="read-attachments" class="read-attachments hidden">
-                            <div class="read-attachments-title"><i class="fa-solid fa-paperclip"></i> 첨부 파일 (<span id="attachments-count">0</span>)</div>
-                            <div id="read-attachments-list" class="read-attachments-list"></div>
+                            
+                            <!-- Attachments Dropdown on the far right -->
+                            <div class="dropdown-attachments hidden" id="dropdown-attachments" style="margin-left: auto; position: relative;">
+                                <button id="btn-reader-attachments" class="btn-action" style="position: relative;">
+                                    <i class="fa-solid fa-paperclip"></i>
+                                    <span>첨부 파일</span>
+                                    <span id="reader-attachments-badge" class="badge-count" style="background: var(--color-primary); color: var(--color-primary-text); font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: bold; margin-left: 2px;">0</span>
+                                    <i class="fa-solid fa-caret-down"></i>
+                                </button>
+                                <div id="reader-attachments-dropdown-list" class="dropdown-content hidden" style="left: auto; right: 0; min-width: 240px; padding: 4px 0;">
+                                    <!-- Dynamic attachments list dropdown -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="reader-body">
+                        <div id="external-image-banner" class="external-image-banner hidden">
+                            <i class="fa-solid fa-eye-slash"></i>
+                            <span>개인정보 보호를 위해 이 메일의 외부 이미지를 차단했습니다.</span>
+                            <button type="button" id="btn-show-external-images" class="btn-banner-action">외부 이미지 표시</button>
+                        </div>
                         <iframe id="mail-body-frame" sandbox="allow-same-origin" title="Mail content"></iframe>
                     </div>
                 </div>
@@ -681,11 +695,23 @@
     <div id="tags-modal" class="tags-overlay hidden">
         <div class="tags-card">
             <div class="tags-header">
-                <h3><i class="fa-solid fa-folder-open"></i> 개인 폴더 관리</h3>
-                <div class="tags-header-actions">
-                    <button id="btn-open-tag-create" class="btn-tag-add-icon" title="새 폴더 추가">
-                        <i class="fa-solid fa-folder-plus"></i>
-                    </button>
+                <div style="display:flex; flex-direction:column; gap:4px; width:100%;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+                        <h3><i class="fa-solid fa-folder-open"></i> 개인 폴더 관리</h3>
+                        <div class="tags-header-actions" id="tags-header-actions-wrapper">
+                            <button id="btn-open-tag-create" class="btn-tag-add-icon" title="새 폴더 추가">
+                                <i class="fa-solid fa-folder-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Dropdown for selecting mail account, hidden when only 1 active account exists -->
+                    <div id="tags-account-select-container" class="form-group hidden" style="margin: 8px 0 0 0; width:100%;">
+                        <div class="custom-select-wrapper" style="width:100%;">
+                            <select id="tags-account-select" style="font-size: 13px; padding: 6px 10px; width:100%;">
+                                <!-- Dynamic options populated by active accounts -->
+                            </select>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="tags-body">

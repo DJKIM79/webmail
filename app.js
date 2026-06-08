@@ -35,11 +35,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = 'mail-hidden-folders-' + state.user.username;
         const hiddenFolders = JSON.parse(localStorage.getItem(key) || '{}');
         
+        const ontoAcc = (state.externalMails || []).find(a => a.service_type === 'onto');
+        const ontoId = ontoAcc ? ontoAcc.id : null;
+
         // 1. Starred, Sent, Drafts, Spam, Trash
         const systemFolders = ['Starred', 'Sent', 'Drafts', 'Spam', 'Trash'];
         systemFolders.forEach(folder => {
             const isHidden = !!hiddenFolders[folder];
-            const selector = `.sidebar-nav [data-folder="${folder}"], .sidebar-nav [data-folder$="_${folder}"]`;
+            let selector = `.sidebar-nav [data-folder="${folder}"]`;
+            if (ontoId) {
+                selector += `, .sidebar-nav [data-folder="ext_${ontoId}_${folder}"]`;
+            }
             document.querySelectorAll(selector).forEach(el => {
                 if (isHidden) {
                     el.style.setProperty('display', 'none', 'important');
@@ -78,10 +84,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hiddenFolders[state.currentFolder]) {
             isCurrentHidden = true;
         } else if (state.currentFolder.startsWith('ext_')) {
-            const parts = state.currentFolder.split('_');
-            const sub = parts[2];
-            if (hiddenFolders[sub]) {
-                isCurrentHidden = true;
+            const matches = state.currentFolder.match(/^ext_(\d+)_(.+)$/);
+            if (matches) {
+                const accId = parseInt(matches[1]);
+                const sub = matches[2];
+                const acc = (state.externalMails || []).find(a => a.id === accId);
+                if (acc) {
+                    if (acc.service_type === 'onto') {
+                        if (hiddenFolders[sub]) isCurrentHidden = true;
+                    } else if (acc.folders) {
+                        const f = acc.folders.find(cf => cf.path === sub);
+                        if (f && f.is_hidden) isCurrentHidden = true;
+                    }
+                }
             }
         }
         
@@ -423,6 +438,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const readTo = document.getElementById('read-to');
     const readDate = document.getElementById('read-date');
     const mailBodyFrame = document.getElementById('mail-body-frame');
+    const externalImageBanner = document.getElementById('external-image-banner');
+    const btnShowExternalImages = document.getElementById('btn-show-external-images');
     
     // Compose Form
     const formCompose = document.getElementById('form-compose');
@@ -735,7 +752,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         loadExternalMailsAndRenderSidebar(state.currentFolder).then(() => {
-            updateGlobalUnreadCount();
+            updateGlobalUnreadCount(true);
+            triggerBackgroundSync();
         });
         
         // Start polling (every 30 seconds)
@@ -948,7 +966,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Fetch emails from the server with pagination
-        const res = await apiRequest('list_emails', 'GET', { folder, offset: 0, limit: 30 });
+        const res = await apiRequest('list_emails', 'GET', { folder, offset: 0, limit: 10 });
         
         const elapsed = Date.now() - startTime;
         const minDuration = 800; // Matches CSS animation duration for a full 180deg cycle
@@ -1139,7 +1157,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const folder = state.currentFolder;
         const nextOffset = state.emails.length;
         
-        const res = await apiRequest('list_emails', 'GET', { folder, offset: nextOffset, limit: 30 });
+        const res = await apiRequest('list_emails', 'GET', { folder, offset: nextOffset, limit: 10 });
         
         if (loadingRow) {
             loadingRow.remove();
@@ -1175,8 +1193,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return '<i class="fa-solid fa-envelopes-bulk" style="color: var(--color-primary);"></i>';
         }
         if (folder.startsWith('ext_')) {
-            const parts = folder.split('_');
-            const sub = parts[parts.length - 1];
+            const matches = folder.match(/^ext_(\d+)_(.+)$/);
+            const sub = matches ? matches[2] : folder;
             switch (sub) {
                 case 'INBOX': return '<i class="fa-solid fa-inbox"></i>';
                 case 'Sent': return '<i class="fa-solid fa-paper-plane"></i>';
@@ -1201,20 +1219,28 @@ document.addEventListener('DOMContentLoaded', () => {
             return '전체 받은 편지함';
         }
         if (folder.startsWith('ext_')) {
-            const parts = folder.split('_');
-            const accId = parseInt(parts[1]);
-            const sub = parts[2];
-            const acc = (state.externalMails || []).find(a => a.id === accId);
-            const emailLabel = acc ? acc.email : '외부 계정';
-            let subLabel = sub;
-            switch (sub) {
-                case 'INBOX': subLabel = '받은 편지함'; break;
-                case 'Sent': subLabel = '보낸 편지함'; break;
-                case 'Drafts': subLabel = '임시 보관함'; break;
-                case 'Spam': subLabel = '스팸 보관함'; break;
-                case 'Trash': subLabel = '휴지통'; break;
+            const matches = folder.match(/^ext_(\d+)_(.+)$/);
+            if (matches) {
+                const accId = parseInt(matches[1]);
+                const sub = matches[2];
+                const acc = (state.externalMails || []).find(a => a.id === accId);
+                const emailLabel = acc ? acc.email : '외부 계정';
+                let subLabel = sub;
+                if (acc && acc.folders) {
+                    const foundFolder = acc.folders.find(f => f.path === sub);
+                    if (foundFolder && foundFolder.display_name) {
+                        subLabel = foundFolder.display_name;
+                    }
+                }
+                switch (subLabel) {
+                    case 'INBOX': subLabel = '받은 편지함'; break;
+                    case 'Sent': subLabel = '보낸 편지함'; break;
+                    case 'Drafts': subLabel = '임시 보관함'; break;
+                    case 'Spam': subLabel = '스팸 보관함'; break;
+                    case 'Trash': subLabel = '휴지통'; break;
+                }
+                return `${subLabel} (${emailLabel})`;
             }
-            return `${subLabel} (${emailLabel})`;
         }
         switch (folder) {
             case 'INBOX': return '받은 편지함';
@@ -1230,8 +1256,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderMailList() {
         const query = mailSearch.value.trim().toLowerCase();
         const filtered = state.emails.filter(email => {
-            const s = email.subject.toLowerCase();
-            const f = email.from.toLowerCase();
+            const s = (email.subject || "").toLowerCase();
+            const f = (email.from || "").toLowerCase();
             const t = (email.to || "").toLowerCase();
             const c = (email.cc || "").toLowerCase();
             const matchesQuery = s.includes(query) || f.includes(query) || t.includes(query) || c.includes(query);
@@ -1444,11 +1470,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function updateGlobalUnreadCount() {
+    async function updateGlobalUnreadCount(sync = false) {
         if (state.user === null) return;
         
         try {
-            const res = await apiRequest('get_unread_counts');
+            const res = await apiRequest('get_unread_counts', 'GET', { sync: sync ? 1 : 0 });
             if (res.success && res.unread_counts) {
                 const counts = res.unread_counts;
                 
@@ -1499,6 +1525,27 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error('Error updating unread count:', err);
         }
+    }
+
+    async function triggerBackgroundSync() {
+        const activeAccounts = (state.externalMails || []).filter(a => a.is_active === 1 && a.service_type !== 'onto');
+        if (activeAccounts.length === 0) return;
+        
+        console.log("Triggering parallel background sync for active external accounts:", activeAccounts.map(a => a.email));
+        
+        const promises = activeAccounts.map(async (acc) => {
+            try {
+                const res = await apiRequest('sync_account_unread', 'GET', { account_id: acc.id });
+                if (res.success) {
+                    console.log(`Sync success for account: ${acc.email}`);
+                }
+            } catch (err) {
+                console.error(`Sync failed for account: ${acc.email}`, err);
+            }
+        });
+        
+        await Promise.all(promises);
+        updateGlobalUnreadCount();
     }
 
     async function loadTags() {
@@ -1714,6 +1761,56 @@ document.addEventListener('DOMContentLoaded', () => {
                 readTo.textContent = email.to;
                 readDate.textContent = email.date;
 
+                // Clear previous state of external image banner
+                if (externalImageBanner) {
+                    externalImageBanner.classList.add('hidden');
+                }
+
+                // Determine image loading policy for this account
+                const emailAcc = (state.externalMails || []).find(a => a.id == email.account_id || (a.service_type === 'onto' && !email.account_id));
+                const imagePolicy = emailAcc ? (emailAcc.external_images || 'ask') : 'ask';
+                const linkPolicy = emailAcc ? (emailAcc.external_links || 'ask') : 'ask';
+
+                let originalBody = email.body || '(내용 없음)';
+                
+                // Resolve inline cid: attachments
+                const inlineAttachments = email.attachments || [];
+                inlineAttachments.forEach(att => {
+                    if (att.content_id) {
+                        const cid1 = `cid:${att.content_id}`;
+                        const cid2 = `cid:<${att.content_id}>`;
+                        const dataUri = `data:${att.content_type};base64,${att.data}`;
+                        originalBody = originalBody.split(cid1).join(dataUri);
+                        originalBody = originalBody.split(cid2).join(dataUri);
+                    }
+                });
+
+                let blockedBody = originalBody;
+                let hasExternalImages = false;
+
+                try {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(originalBody, 'text/html');
+                    const imgs = doc.querySelectorAll('img');
+                    imgs.forEach(img => {
+                        const src = img.getAttribute('src');
+                        if (src && (src.startsWith('http://') || src.startsWith('https://'))) {
+                            hasExternalImages = true;
+                            img.setAttribute('data-blocked-src', src);
+                            img.removeAttribute('src');
+                        }
+                    });
+                    blockedBody = doc.body.innerHTML;
+                } catch (e) {
+                    console.error('Error preprocessing email body images:', e);
+                }
+
+                if (hasExternalImages && imagePolicy === 'ask') {
+                    if (externalImageBanner) {
+                        externalImageBanner.classList.remove('hidden');
+                    }
+                }
+
                 // Requirements 3.1: 다크 테마 배경 투명 및 글자색 연동
                 let bodyBg = '#161621'; // Solid dark theme bg
                 let bodyColor = '#f3f4f6';
@@ -1754,7 +1851,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 `;
                 
-                const content = `
+                const makeIframeContent = (bodyText) => `
                     <html style="background-color: ${bodyBg}; color: ${bodyColor};">
                     <head>
                         <style>
@@ -1772,16 +1869,50 @@ document.addEventListener('DOMContentLoaded', () => {
                         </style>
                     </head>
                     <body style="background-color: ${bodyBg}; color: ${bodyColor};">
-                        ${email.body || '(내용 없음)'}
+                        ${bodyText}
                     </body>
                     </html>
                 `;
+
+                const blockedContent = makeIframeContent(blockedBody);
+                const unblockedContent = makeIframeContent(originalBody);
+
+                state.currentEmailUnfilteredContent = unblockedContent;
+
+                let content = unblockedContent;
+                if (hasExternalImages && (imagePolicy === 'ask' || imagePolicy === 'deny')) {
+                    content = blockedContent;
+                }
                 
                 // Hide iframe to avoid white load flash
                 mailBodyFrame.style.opacity = '0';
 
                 // Register load listener BEFORE assigning srcdoc to catch it reliably and overwrite any previous listeners
                 mailBodyFrame.onload = () => {
+                    // Hide scrollbar inside iframe for aesthetic reasons while keeping scrolling functional
+                    try {
+                        const iframeDoc = mailBodyFrame.contentDocument || mailBodyFrame.contentWindow.document;
+                        if (iframeDoc) {
+                            const style = iframeDoc.createElement('style');
+                            style.textContent = `
+                                html::-webkit-scrollbar, body::-webkit-scrollbar {
+                                    display: none !important;
+                                }
+                                html, body {
+                                    -ms-overflow-style: none !important;
+                                    scrollbar-width: none !important;
+                                }
+                            `;
+                            if (iframeDoc.head) {
+                                iframeDoc.head.appendChild(style);
+                            } else {
+                                iframeDoc.documentElement.appendChild(style);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Cannot inject scrollbar style into iframe:', err);
+                    }
+
                     // Defer showing iframe slightly to ensure layout and first paint are completed
                     setTimeout(() => {
                         mailBodyFrame.style.opacity = '1';
@@ -1836,12 +1967,18 @@ document.addEventListener('DOMContentLoaded', () => {
                                 e.preventDefault();
                                 const url = a.href;
                                 if (url.startsWith('http://') || url.startsWith('https://')) {
-                                    const escapedUrl = escapeHtml(url);
-                                    customConfirm(`외부 링크로 이동하시겠습니까?\n\n<span class="confirm-url" title="${escapedUrl}">${escapedUrl}</span>`, 'fa-solid fa-link', '진행').then(confirmed => {
-                                        if (confirmed) {
-                                            window.open(url, '_blank');
-                                        }
-                                    });
+                                    if (linkPolicy === 'deny') {
+                                        showToast('외부 링크 이동이 제한되어 있습니다.');
+                                    } else if (linkPolicy === 'allow') {
+                                        window.open(url, '_blank');
+                                    } else { // 'ask'
+                                        const escapedUrl = escapeHtml(url);
+                                        customConfirm(`외부 링크로 이동하시겠습니까?\n\n<span class="confirm-url" title="${escapedUrl}">${escapedUrl}</span>`, 'fa-solid fa-link', '진행').then(confirmed => {
+                                            if (confirmed) {
+                                                window.open(url, '_blank');
+                                            }
+                                        });
+                                    }
                                 } else if (url.startsWith('mailto:')) {
                                     window.open(url, '_top');
                                 }
@@ -1856,35 +1993,64 @@ document.addEventListener('DOMContentLoaded', () => {
                 mailBodyFrame.srcdoc = content;
                 console.log("mailBodyFrame srcdoc successfully assigned.");
 
-                // Display attachments if present in the email
-                const readAttachments = document.getElementById('read-attachments');
-                const attachmentsCount = document.getElementById('attachments-count');
-                const readAttachmentsList = document.getElementById('read-attachments-list');
+                // Display attachments dropdown if present in the email
+                const dropdownAttachments = document.getElementById('dropdown-attachments');
+                const readerAttachmentsBadge = document.getElementById('reader-attachments-badge');
+                const readerAttachmentsDropdownList = document.getElementById('reader-attachments-dropdown-list');
                 
-                if (readAttachments && readAttachmentsList && attachmentsCount) {
+                if (dropdownAttachments && readerAttachmentsBadge && readerAttachmentsDropdownList) {
                     const attachments = email.attachments || [];
                     if (attachments.length > 0) {
-                        readAttachments.classList.remove('hidden');
-                        attachmentsCount.textContent = attachments.length;
-                        readAttachmentsList.innerHTML = '';
+                        dropdownAttachments.classList.remove('hidden');
+                        readerAttachmentsBadge.textContent = attachments.length;
+                        readerAttachmentsDropdownList.innerHTML = '';
+                        
+                        // "모두 받기" (Download All) option
+                        const downloadAllLink = document.createElement('a');
+                        downloadAllLink.href = '#';
+                        downloadAllLink.style.fontWeight = '600';
+                        downloadAllLink.style.borderBottom = '1px solid var(--border-color)';
+                        downloadAllLink.style.display = 'flex';
+                        downloadAllLink.style.alignItems = 'center';
+                        downloadAllLink.style.gap = '8px';
+                        downloadAllLink.style.color = 'var(--color-primary)';
+                        downloadAllLink.innerHTML = `<i class="fa-solid fa-download"></i> <span>모두 받기</span>`;
+                        downloadAllLink.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            attachments.forEach(att => {
+                                const tempLink = document.createElement('a');
+                                tempLink.href = `data:${att.content_type};base64,${att.data}`;
+                                tempLink.download = att.filename;
+                                document.body.appendChild(tempLink);
+                                tempLink.click();
+                                document.body.removeChild(tempLink);
+                            });
+                        });
+                        readerAttachmentsDropdownList.appendChild(downloadAllLink);
                         
                         attachments.forEach(att => {
                             const a = document.createElement('a');
                             a.href = `data:${att.content_type};base64,${att.data}`;
                             a.download = att.filename;
-                            a.className = 'read-attachment-item';
+                            a.style.display = 'flex';
+                            a.style.alignItems = 'center';
+                            a.style.justifyContent = 'space-between';
+                            a.style.gap = '12px';
+                            a.style.padding = '10px 16px';
                             
                             const sizeKB = (att.size / 1024).toFixed(1);
                             
                             a.innerHTML = `
-                                <i class="fa-solid fa-file-arrow-down"></i>
-                                <span>${escapeHtml(att.filename)}</span>
-                                <span style="color: var(--text-muted);">(${sizeKB} KB)</span>
+                                <span style="display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 185px;">
+                                    <i class="fa-solid fa-file-arrow-down" style="color: var(--text-secondary); font-size: 13px;"></i>
+                                    <span title="${escapeHtml(att.filename)}">${escapeHtml(att.filename)}</span>
+                                </span>
+                                <span style="font-size: 11px; color: var(--text-secondary); white-space: nowrap;">(${sizeKB} KB)</span>
                             `;
-                            readAttachmentsList.appendChild(a);
+                            readerAttachmentsDropdownList.appendChild(a);
                         });
                     } else {
-                        readAttachments.classList.add('hidden');
+                        dropdownAttachments.classList.add('hidden');
                     }
                 }
 
@@ -2992,7 +3158,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setupClickOutside(document.getElementById('compose-confirm-modal'));
     
-    btnRefresh.addEventListener('click', () => loadEmails(state.currentFolder, false));
+    btnRefresh.addEventListener('click', () => {
+        loadEmails(state.currentFolder, false);
+        updateGlobalUnreadCount(true);
+        triggerBackgroundSync();
+    });
+
+    if (btnShowExternalImages) {
+        btnShowExternalImages.addEventListener('click', () => {
+            try {
+                if (state.currentEmailUnfilteredContent) {
+                    mailBodyFrame.srcdoc = state.currentEmailUnfilteredContent;
+                }
+            } catch (err) {
+                console.error('Error showing external images:', err);
+            }
+            if (externalImageBanner) {
+                externalImageBanner.classList.add('hidden');
+            }
+        });
+    }
     
     const btnEmptyTrash = document.getElementById('btn-empty-trash');
     if (btnEmptyTrash) {
@@ -3189,6 +3374,35 @@ document.addEventListener('DOMContentLoaded', () => {
         btnManageTags.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            
+            // Populate and show/hide the account select dropdown
+            const selectContainer = document.getElementById('tags-account-select-container');
+            const selectEl = document.getElementById('tags-account-select');
+            const activeAccounts = (state.externalMails || []).filter(a => a.is_active === 1);
+            
+            if (activeAccounts.length > 1) {
+                if (selectContainer) selectContainer.classList.remove('hidden');
+                if (selectEl) {
+                    selectEl.innerHTML = '';
+                    activeAccounts.forEach(acc => {
+                        const option = document.createElement('option');
+                        option.value = acc.id;
+                        const label = acc.service_type === 'onto' ? 'OnTo Mail (기본)' : `${acc.service_type.charAt(0).toUpperCase() + acc.service_type.slice(1)} (${acc.email})`;
+                        option.textContent = label;
+                        selectEl.appendChild(option);
+                    });
+                    
+                    // Bind change event to reload list
+                    const newSelectEl = selectEl.cloneNode(true);
+                    selectEl.parentNode.replaceChild(newSelectEl, selectEl);
+                    newSelectEl.addEventListener('change', () => {
+                        loadTagsModalList();
+                    });
+                }
+            } else {
+                if (selectContainer) selectContainer.classList.add('hidden');
+            }
+
             tagsModal.classList.remove('hidden');
             loadTagsModalList();
         });
@@ -3208,201 +3422,295 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!refreshOnly) {
             tagsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> 로딩 중...</td></tr>';
         }
-        
-        const res = await apiRequest('list_tags');
-        if (res.success) {
-            const tags = res.tags || [];
-            tagsModalList.innerHTML = '';
-            
-            const systemFolders = [
-                { id: 'Starred', name: '즐겨찾기', icon: 'fa-star', color: '#f59e0b' },
-                { id: 'Sent', name: '보낸 편지함', icon: 'fa-paper-plane', color: '#10b981' },
-                { id: 'Drafts', name: '임시 보관함', icon: 'fa-file-signature', color: '#6b7280' },
-                { id: 'Spam', name: '스팸 보관함', icon: 'fa-ban', color: '#ef4444' },
-                { id: 'Trash', name: '휴지통', icon: 'fa-trash-can', color: '#ef4444' },
-                { id: 'custom-tags', name: '개인 보관함', icon: 'fa-box-archive', color: 'var(--text-secondary)' }
-            ];
-            
-            const key = 'mail-hidden-folders-' + (state.user ? state.user.username : '');
-            const hiddenFolders = JSON.parse(localStorage.getItem(key) || '{}');
-            
-            systemFolders.forEach(sys => {
-                const isHidden = !!hiddenFolders[sys.id];
-                const tr = document.createElement('tr');
-                tr.className = 'system-folder-row';
-                
-                tr.innerHTML = `
-                    <td>
-                        <i class="fa-solid ${sys.icon}" style="color: ${sys.color}; margin-right: 8px;"></i>
-                        <span class="system-folder-name-label" style="font-weight: 500;">${sys.name}</span>
-                    </td>
-                    <td style="text-align: center; white-space: nowrap;">
-                        <button class="btn-tag-visibility ${isHidden ? 'hidden-state' : ''}" data-folder="${sys.id}">
-                            ${isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김'}
-                        </button>
-                    </td>
-                `;
-                
-                tr.querySelector('.btn-tag-visibility').addEventListener('click', (e) => {
-                    const btn = e.currentTarget;
-                    const folderId = btn.dataset.folder;
-                    toggleFolderVisibility(folderId, btn);
-                });
-                
-                tagsModalList.appendChild(tr);
-            });
-            
-            tags.forEach(t => {
-                const tag = t.name;
-                const isHidden = !!hiddenFolders[tag];
-                const tr = document.createElement('tr');
-                tr.draggable = true;
-                tr.dataset.tag = tag;
-                tr.className = 'tag-drag-item';
-                tr.style.cursor = 'pointer';
-                
-                const folderColor = getFolderColor(tag);
-                tr.innerHTML = `
-                    <td>
-                        <i class="fa-solid fa-folder tag-folder-icon-clickable" style="color: ${folderColor}; margin-right: 8px; cursor: pointer;" data-tag="${escapeHtml(tag)}"></i> 
-                        <span class="tag-name-label" style="cursor: pointer; border-bottom: 1px dashed var(--text-secondary);" title="클릭하여 이름 수정">${escapeHtml(tag)}</span>
-                    </td>
-                    <td style="text-align: center; white-space: nowrap;">
-                        <button class="btn-tag-visibility ${isHidden ? 'hidden-state' : ''}" data-folder="${escapeHtml(tag)}">
-                            ${isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김'}
-                        </button>
-                        <button class="btn-tag-delete btn-danger-action" data-tag="${escapeHtml(tag)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>
-                    </td>
-                `;
-                
-                tr.querySelector('.btn-tag-visibility').addEventListener('click', (e) => {
-                    const btn = e.currentTarget;
-                    const folderId = btn.dataset.folder;
-                    toggleFolderVisibility(folderId, btn);
-                });
 
-                const label = tr.querySelector('.tag-name-label');
-                label.addEventListener('click', (e) => {
-                    e.stopPropagation();
+        const selectEl = document.getElementById('tags-account-select');
+        const activeAccounts = (state.externalMails || []).filter(a => a.is_active === 1);
+        
+        let selectedAccId = null;
+        if (selectEl && activeAccounts.length > 1 && selectEl.value) {
+            selectedAccId = parseInt(selectEl.value);
+        } else {
+            const onto = activeAccounts.find(a => a.service_type === 'onto');
+            if (onto) selectedAccId = onto.id;
+        }
+
+        const selectedAcc = activeAccounts.find(a => a.id === selectedAccId);
+        const isOnto = selectedAcc ? (selectedAcc.service_type === 'onto') : true;
+
+        const btnOpenTagCreate = document.getElementById('btn-open-tag-create');
+        if (btnOpenTagCreate) {
+            if (isOnto) {
+                btnOpenTagCreate.classList.remove('hidden');
+            } else {
+                btnOpenTagCreate.classList.add('hidden');
+            }
+        }
+
+        if (isOnto) {
+            const res = await apiRequest('list_tags');
+            if (res.success) {
+                const tags = res.tags || [];
+                tagsModalList.innerHTML = '';
+                
+                const systemFolders = [
+                    { id: 'Starred', name: '즐겨찾기', icon: 'fa-star', color: '#f59e0b' },
+                    { id: 'Sent', name: '보낸 편지함', icon: 'fa-paper-plane', color: '#10b981' },
+                    { id: 'Drafts', name: '임시 보관함', icon: 'fa-file-signature', color: '#6b7280' },
+                    { id: 'Spam', name: '스팸 보관함', icon: 'fa-ban', color: '#ef4444' },
+                    { id: 'Trash', name: '휴지통', icon: 'fa-trash-can', color: '#ef4444' },
+                    { id: 'custom-tags', name: '개인 보관함', icon: 'fa-box-archive', color: 'var(--text-secondary)' }
+                ];
+                
+                const key = 'mail-hidden-folders-' + (state.user ? state.user.username : '');
+                const hiddenFolders = JSON.parse(localStorage.getItem(key) || '{}');
+                
+                systemFolders.forEach(sys => {
+                    const isHidden = !!hiddenFolders[sys.id];
+                    const tr = document.createElement('tr');
+                    tr.className = 'system-folder-row';
                     
-                    const input = document.createElement('input');
-                    input.type = 'text';
-                    input.value = tag;
-                    input.className = 'tag-name-edit-input';
-                    input.style.cssText = 'padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; width: 150px;';
+                    tr.innerHTML = `
+                        <td>
+                            <i class="fa-solid ${sys.icon}" style="color: ${sys.color}; margin-right: 8px;"></i>
+                            <span class="system-folder-name-label" style="font-weight: 500;">${sys.name}</span>
+                        </td>
+                        <td style="text-align: center; white-space: nowrap;">
+                            <button class="btn-tag-visibility ${isHidden ? 'hidden-state' : ''}" data-folder="${sys.id}">
+                                ${isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김'}
+                            </button>
+                        </td>
+                    `;
                     
-                    label.replaceWith(input);
-                    input.focus();
-                    input.select();
+                    tr.querySelector('.btn-tag-visibility').addEventListener('click', (e) => {
+                        const btn = e.currentTarget;
+                        const folderId = btn.dataset.folder;
+                        toggleFolderVisibility(folderId, btn);
+                    });
                     
-                    let finished = false;
+                    tagsModalList.appendChild(tr);
+                });
+                
+                tags.forEach(t => {
+                    const tag = t.name;
+                    const isHidden = !!hiddenFolders[tag];
+                    const tr = document.createElement('tr');
+                    tr.draggable = true;
+                    tr.dataset.tag = tag;
+                    tr.className = 'tag-drag-item';
+                    tr.style.cursor = 'pointer';
                     
-                    const finishEdit = async () => {
-                        if (finished) return;
-                        finished = true;
+                    const folderColor = getFolderColor(tag);
+                    tr.innerHTML = `
+                        <td>
+                            <i class="fa-solid fa-folder tag-folder-icon-clickable" style="color: ${folderColor}; margin-right: 8px; cursor: pointer;" data-tag="${escapeHtml(tag)}"></i> 
+                            <span class="tag-name-label" style="cursor: pointer; border-bottom: 1px dashed var(--text-secondary);" title="클릭하여 이름 수정">${escapeHtml(tag)}</span>
+                        </td>
+                        <td style="text-align: center; white-space: nowrap;">
+                            <button class="btn-tag-visibility ${isHidden ? 'hidden-state' : ''}" data-folder="${escapeHtml(tag)}">
+                                ${isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김'}
+                            </button>
+                            <button class="btn-tag-delete btn-danger-action" data-tag="${escapeHtml(tag)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>
+                        </td>
+                    `;
+                    
+                    tr.querySelector('.btn-tag-visibility').addEventListener('click', (e) => {
+                        const btn = e.currentTarget;
+                        const folderId = btn.dataset.folder;
+                        toggleFolderVisibility(folderId, btn);
+                    });
+
+                    const label = tr.querySelector('.tag-name-label');
+                    label.addEventListener('click', (e) => {
+                        e.stopPropagation();
                         
-                        const newName = input.value.trim();
-                        if (!newName || newName === tag) {
-                            input.replaceWith(label);
-                            return;
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = tag;
+                        input.className = 'tag-name-edit-input';
+                        input.style.cssText = 'padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; width: 150px;';
+                        
+                        label.replaceWith(input);
+                        input.focus();
+                        input.select();
+                        
+                        let finished = false;
+                        
+                        const finishEdit = async () => {
+                            if (finished) return;
+                            finished = true;
+                            
+                            const newName = input.value.trim();
+                            if (!newName || newName === tag) {
+                                input.replaceWith(label);
+                                return;
+                            }
+                            
+                            if (!/^[\p{L}\p{N}_\- ]+$/u.test(newName)) {
+                                showToast('폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-), 공백만 가능합니다.');
+                                input.replaceWith(label);
+                                return;
+                            }
+                            
+                            showToast('폴더 이름 변경 중...');
+                            const r = await apiRequest('rename_tag', 'POST', { old_name: tag, new_name: newName });
+                            showToast(r.message);
+                            if (r.success) {
+                                if (state.currentFolder === tag) {
+                                    setCookie('currentFolder', newName);
+                                    state.currentFolder = newName;
+                                }
+                                loadTags();
+                                loadTagsModalList(true);
+                            } else {
+                                input.replaceWith(label);
+                            }
+                        };
+                        
+                        input.addEventListener('blur', finishEdit);
+                        input.addEventListener('keydown', (evt) => {
+                            if (evt.key === 'Enter') finishEdit();
+                            if (evt.key === 'Escape') {
+                                finished = true;
+                                input.replaceWith(label);
+                            }
+                        });
+                    });
+
+                    // Drag and Drop
+                    tr.addEventListener('dragstart', (e) => {
+                        tr.classList.add('dragging');
+                        e.dataTransfer.setData('text/plain', tag);
+                    });
+
+                    tr.addEventListener('dragend', () => {
+                        tr.classList.remove('dragging');
+                        saveTagOrder();
+                    });
+
+                    tr.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        const draggingItem = tagsModalList.querySelector('.dragging');
+                        if (draggingItem && draggingItem !== tr) {
+                            const bounding = tr.getBoundingClientRect();
+                            const offset = e.clientY - bounding.top;
+                            if (offset > bounding.height / 2) {
+                                tr.after(draggingItem);
+                            } else {
+                                tr.before(draggingItem);
+                            }
                         }
+                    });
+
+                    tr.querySelector('.btn-tag-delete').addEventListener('click', async (evt) => {
+                        const tName = evt.currentTarget.dataset.tag;
+                        if (!await customConfirm(`'${tName}' 개인 폴더를 삭제하시겠습니까?\n폴더 내부의 모든 메일은 '휴지통'으로 이동됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
                         
-                        if (!/^[\p{L}\p{N}_\- ]+$/u.test(newName)) {
-                            showToast('폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-), 공백만 가능합니다.');
-                            input.replaceWith(label);
-                            return;
-                        }
-                        
-                        showToast('폴더 이름 변경 중...');
-                        const r = await apiRequest('rename_tag', 'POST', { old_name: tag, new_name: newName });
+                        showToast('폴더 삭제 중...');
+                        const r = await apiRequest('delete_tag', 'POST', { tag_name: tName });
                         showToast(r.message);
                         if (r.success) {
-                            if (state.currentFolder === tag) {
-                                setCookie('currentFolder', newName);
-                                state.currentFolder = newName;
-                            }
                             loadTagsModalList(true);
                             loadTags();
-                        } else {
-                            input.replaceWith(label);
-                        }
-                    };
-                    
-                    input.addEventListener('keydown', (evt) => {
-                        if (evt.key === 'Enter') {
-                            evt.preventDefault();
-                            finishEdit();
-                        } else if (evt.key === 'Escape') {
-                            finished = true;
-                            input.replaceWith(label);
+                            updateGlobalUnreadCount();
+                            if (state.currentFolder === tName) {
+                                setCookie('currentFolder', 'INBOX');
+                                loadEmails('INBOX');
+                            }
                         }
                     });
-                    
-                    input.addEventListener('blur', () => {
-                        finishEdit();
+
+                    // Color picker click handler
+                    tr.querySelector('.tag-folder-icon-clickable').addEventListener('click', (evt) => {
+                        evt.stopPropagation();
+                        const tagVal = evt.currentTarget.dataset.tag;
+                        const rect = evt.currentTarget.getBoundingClientRect();
+                        
+                        tagColorPopover.classList.remove('hidden');
+                        tagColorPopover.style.top = `${rect.bottom + 5}px`;
+                        tagColorPopover.style.left = `${rect.left}px`;
+                        
+                        renderColorPicker(tagVal);
                     });
-                });
-
-                // Drag and Drop
-                tr.addEventListener('dragstart', (e) => {
-                    tr.classList.add('dragging');
-                    e.dataTransfer.setData('text/plain', tag);
-                });
-
-                tr.addEventListener('dragend', () => {
-                    tr.classList.remove('dragging');
-                    saveTagOrder();
-                });
-
-                tr.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    const draggingItem = tagsModalList.querySelector('.dragging');
-                    if (draggingItem && draggingItem !== tr) {
-                        const bounding = tr.getBoundingClientRect();
-                        const offset = e.clientY - bounding.top;
-                        if (offset > bounding.height / 2) {
-                            tr.after(draggingItem);
-                        } else {
-                            tr.before(draggingItem);
-                        }
-                    }
-                });
-                
-                tr.querySelector('.btn-tag-delete').addEventListener('click', async (evt) => {
-                    const tName = evt.currentTarget.dataset.tag;
-                    if (!await customConfirm(`'${tName}' 개인 폴더를 삭제하시겠습니까?\n폴더 내부의 모든 메일은 '휴지통'으로 이동됩니다.`, 'fa-solid fa-triangle-exclamation')) return;
                     
-                    showToast('폴더 삭제 중...');
-                    const r = await apiRequest('delete_tag', 'POST', { tag_name: tName });
-                    showToast(r.message);
-                    if (r.success) {
-                        loadTagsModalList(true);
-                        loadTags();
-                        updateGlobalUnreadCount();
-                        if (state.currentFolder === tName) {
-                            setCookie('currentFolder', 'INBOX');
-                            loadEmails('INBOX');
-                        }
-                    }
+                    tagsModalList.appendChild(tr);
                 });
-
-                // Color picker logic
-                tr.querySelector('.tag-folder-icon-clickable').addEventListener('click', (evt) => {
-                    evt.stopPropagation();
-                    const tag = evt.target.dataset.tag;
-                    const rect = evt.target.getBoundingClientRect();
-                    
-                    tagColorPopover.classList.remove('hidden');
-                    tagColorPopover.style.top = `${rect.bottom + 5}px`;
-                    tagColorPopover.style.left = `${rect.left}px`;
-                    
-                    renderColorPicker(tag);
-                });
-                
-                tagsModalList.appendChild(tr);
-            });
+            } else {
+                showToast(res.message);
+            }
         } else {
-            showToast(res.message);
+            // Load external account's folders via list_external_folders API
+            try {
+                const res = await apiRequest('list_external_folders', 'GET', { account_id: selectedAccId });
+                if (res.success) {
+                    const folders = res.folders || [];
+                    tagsModalList.innerHTML = '';
+                    
+                    if (folders.length === 0) {
+                        tagsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center; color: var(--text-secondary); padding: 20px;">불러올 폴더가 없습니다.</td></tr>';
+                    } else {
+                        folders.forEach(f => {
+                            const tr = document.createElement('tr');
+                            tr.className = 'external-folder-row';
+                            
+                            const isHidden = !!f.is_hidden;
+                            const isSystem = f.type !== 'custom';
+                            const iconClass = f.type === 'inbox' ? 'fa-inbox' : (f.type === 'custom' ? 'fa-folder' : 'fa-folder-open');
+                            
+                            tr.innerHTML = `
+                                <td>
+                                    <i class="fa-solid ${iconClass}" style="opacity: 0.6; margin-right: 8px;"></i>
+                                    <span style="font-weight: 500;">${escapeHtml(f.display_name || f.path)}</span>
+                                    ${isSystem ? '<span style="font-size: 10px; background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px; color: var(--text-secondary); margin-left: 8px;">시스템</span>' : ''}
+                                </td>
+                                <td style="text-align: center; white-space: nowrap;">
+                                    <button class="btn-tag-visibility ${isHidden ? 'hidden-state' : ''}" data-path="${escapeHtml(f.path)}">
+                                        ${isHidden ? '<i class="fa-solid fa-eye"></i> 표시' : '<i class="fa-solid fa-eye-slash"></i> 숨김'}
+                                    </button>
+                                </td>
+                            `;
+                            
+                            const btn = tr.querySelector('.btn-tag-visibility');
+                            btn.addEventListener('click', async () => {
+                                const nextHidden = isHidden ? 0 : 1;
+                                showToast('설정 변경 중...');
+                                try {
+                                    const updateRes = await apiRequest('update_external_folder_settings', 'POST', {
+                                        account_id: selectedAccId,
+                                        folder_path: f.path,
+                                        is_hidden: nextHidden
+                                    });
+                                    showToast(updateRes.message);
+                                    if (updateRes.success) {
+                                        // Update state cache
+                                        const cachedAcc = state.externalMails.find(a => a.id === selectedAccId);
+                                        if (cachedAcc) {
+                                            if (!cachedAcc.folders) cachedAcc.folders = [];
+                                            const cachedF = cachedAcc.folders.find(cf => cf.path === f.path);
+                                            if (cachedF) {
+                                                cachedF.is_hidden = nextHidden;
+                                            } else {
+                                                cachedAcc.folders.push({ path: f.path, type: f.type, is_hidden: nextHidden });
+                                            }
+                                        }
+                                        loadTagsModalList(true);
+                                        renderSidebar(state.currentFolder);
+                                    }
+                                } catch (e) {
+                                    console.error('Error toggling external folder visibility:', e);
+                                    showToast('연동 폴더 설정을 변경하지 못했습니다.');
+                                }
+                            });
+                            
+                            tagsModalList.appendChild(tr);
+                        });
+                    }
+                } else {
+                    tagsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center; color: var(--text-danger); padding: 20px;">' + escapeHtml(res.message) + '</td></tr>';
+                }
+            } catch (err) {
+                console.error('Error fetching external folders:', err);
+                tagsModalList.innerHTML = '<tr><td colspan="2" style="text-align: center; color: var(--text-danger); padding: 20px;">폴더 목록을 불러오지 못했습니다.</td></tr>';
+            }
         }
     }
 
@@ -3968,16 +4276,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Tag Move Dropdown Click Toggle
+    // Tag Move Dropdown Click Toggle
     const btnMoveTag = document.getElementById('btn-move-tag');
     const tagMoveDropdownList = document.getElementById('tag-move-dropdown-list');
+    const btnReaderAttachments = document.getElementById('btn-reader-attachments');
+    const readerAttachmentsDropdownList = document.getElementById('reader-attachments-dropdown-list');
+
     if (btnMoveTag && tagMoveDropdownList) {
         btnMoveTag.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (readerAttachmentsDropdownList) readerAttachmentsDropdownList.classList.add('hidden');
             tagMoveDropdownList.classList.toggle('hidden');
         });
         document.addEventListener('click', () => {
             tagMoveDropdownList.classList.add('hidden');
+        });
+    }
+
+    if (btnReaderAttachments && readerAttachmentsDropdownList) {
+        btnReaderAttachments.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (tagMoveDropdownList) tagMoveDropdownList.classList.add('hidden');
+            readerAttachmentsDropdownList.classList.toggle('hidden');
+        });
+        document.addEventListener('click', () => {
+            readerAttachmentsDropdownList.classList.add('hidden');
         });
     }
 
@@ -4143,32 +4468,61 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="sidebar-group-submenu ${isCollapsed ? 'collapsed' : ''}" id="submenu_${acc.id}">
                         <div class="submenu-inner">
-                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_INBOX">
-                            <i class="fa-solid fa-inbox"></i>
-                            <span class="nav-label">받은 편지함</span>
-                            <span class="badge" style="display:none;">0</span>
-                        </a>
-                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Sent">
-                            <i class="fa-solid fa-paper-plane"></i>
-                            <span class="nav-label">보낸 편지함</span>
-                            <span class="badge" style="display:none;">0</span>
-                        </a>
-                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Drafts">
-                            <i class="fa-solid fa-file-signature"></i>
-                            <span class="nav-label">임시 보관함</span>
-                            <span class="badge" style="display:none;">0</span>
-                        </a>
-                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Spam">
-                            <i class="fa-solid fa-ban"></i>
-                            <span class="nav-label">스팸 보관함</span>
-                            <span class="badge" style="display:none;">0</span>
-                        </a>
-                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_Trash">
-                            <i class="fa-solid fa-trash-can"></i>
-                            <span class="nav-label">휴지통</span>
-                            <span class="badge" style="display:none;">0</span>
-                        </a>
                 `;
+                const folders = acc.folders && acc.folders.length > 0 ? acc.folders : [
+                    { path: 'INBOX', type: 'inbox', is_hidden: 0 },
+                    { path: 'Sent', type: 'sent', is_hidden: 0 },
+                    { path: 'Drafts', type: 'drafts', is_hidden: 0 },
+                    { path: 'Spam', type: 'spam', is_hidden: 0 },
+                    { path: 'Trash', type: 'trash', is_hidden: 0 }
+                ];
+
+                const sortedFolders = [...folders].sort((a, b) => {
+                    const typeOrder = {
+                        'inbox': 1,
+                        'sent': 2,
+                        'drafts': 3,
+                        'spam': 4,
+                        'trash': 5,
+                        'custom': 6
+                    };
+                    const orderA = typeOrder[a.type] || 6;
+                    const orderB = typeOrder[b.type] || 6;
+                    if (orderA !== orderB) {
+                        return orderA - orderB;
+                    }
+                    const nameA = (a.display_name || a.path || '').toLowerCase();
+                    const nameB = (b.display_name || b.path || '').toLowerCase();
+                    return nameA.localeCompare(nameB);
+                });
+
+                sortedFolders.forEach(f => {
+                    if (f.is_hidden) return;
+                    
+                    const iconMap = {
+                        'inbox': 'fa-inbox',
+                        'sent': 'fa-paper-plane',
+                        'drafts': 'fa-file-signature',
+                        'spam': 'fa-ban',
+                        'trash': 'fa-trash-can'
+                    };
+                    const icon = iconMap[f.type] || 'fa-folder';
+                    
+                    let label = f.display_name || f.path;
+                    if (f.type === 'inbox') label = '받은 편지함';
+                    else if (f.type === 'sent') label = '보낸 편지함';
+                    else if (f.type === 'drafts') label = '임시 보관함';
+                    else if (f.type === 'spam') label = '스팸 보관함';
+                    else if (f.type === 'trash') label = '휴지통';
+
+                    html += `
+                        <a href="#" class="nav-item" data-folder="ext_${acc.id}_${escapeHtml(f.path)}">
+                            <i class="fa-solid ${icon}"></i>
+                            <span class="nav-label">${escapeHtml(label)}</span>
+                            <span class="badge" style="display:none;">0</span>
+                        </a>
+                    `;
+                });
 
                 if (acc.service_type === 'onto') {
                     html += `
@@ -4671,6 +5025,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
 
+                <div class="input-grid-2x2" style="margin-bottom: 15px;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="detail-external-images">외부 이미지 표시</label>
+                        <div class="custom-select-wrapper" style="width: 100%;">
+                            <select id="detail-external-images">
+                                <option value="allow" ${acc && acc.external_images === 'allow' ? 'selected' : ''}>항상 허용</option>
+                                <option value="ask" ${!acc || acc.external_images === 'ask' || !acc.external_images ? 'selected' : ''}>묻기</option>
+                                <option value="deny" ${acc && acc.external_images === 'deny' ? 'selected' : ''}>거부</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="detail-external-links">외부 링크 허용</label>
+                        <div class="custom-select-wrapper" style="width: 100%;">
+                            <select id="detail-external-links">
+                                <option value="allow" ${acc && acc.external_links === 'allow' ? 'selected' : ''}>항상 허용</option>
+                                <option value="ask" ${!acc || acc.external_links === 'ask' || !acc.external_links ? 'selected' : ''}>묻기</option>
+                                <option value="deny" ${acc && acc.external_links === 'deny' ? 'selected' : ''}>거부</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 ${isOnto ? `
                     <div class="input-grid-2x2">
                         <div class="form-group">
@@ -4839,6 +5216,21 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
+        // Immediate image display option change save
+        const toggleImages = externalMailDetailPane.querySelector('#detail-external-images');
+        if (toggleImages && !isNew) {
+            toggleImages.addEventListener('change', () => {
+                if (formDetail) formDetail.requestSubmit();
+            });
+        }
+
+        const toggleLinks = externalMailDetailPane.querySelector('#detail-external-links');
+        if (toggleLinks && !isNew) {
+            toggleLinks.addEventListener('change', () => {
+                if (formDetail) formDetail.requestSubmit();
+            });
+        }
+
         const serviceSelect = externalMailDetailPane.querySelector('#detail-service-type');
         const customServerSettings = externalMailDetailPane.querySelector('#custom-server-settings');
         
@@ -4938,7 +5330,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     email,
                     mail_username,
                     is_active,
-                    color
+                    color,
+                    external_images: document.getElementById('detail-external-images').value,
+                    external_links: document.getElementById('detail-external-links').value
                 };
 
                 if (!isOnto) {
@@ -5006,16 +5400,56 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('설정을 저장하는 중...');
                 try {
                     const res = await apiRequest('save_external_mail', 'POST', data);
-                    showToast(res.message);
                     if (res.success) {
+                        showToast(res.message);
                         loadExternalMailSettingsList(id || null);
                         loadExternalMailsAndRenderSidebar(state.currentFolder);
+                    } else {
+                        showToast(res.message);
+                        if (res.error_type === 'imap') {
+                            ['detail-imap-host', 'detail-imap-port', 'detail-mail-username', 'detail-mail-password'].forEach(fieldId => {
+                                const input = document.getElementById(fieldId);
+                                if (input) {
+                                    input.classList.add('validation-error');
+                                    let balloonTargetId = 'detail-imap-host';
+                                    if (document.getElementById('detail-service-type') && document.getElementById('detail-service-type').value !== 'custom') {
+                                        balloonTargetId = 'detail-mail-password';
+                                    }
+                                    if (fieldId === balloonTargetId) {
+                                        const balloon = document.createElement('div');
+                                        balloon.className = 'validation-error-balloon';
+                                        balloon.textContent = res.message;
+                                        input.parentNode.appendChild(balloon);
+                                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                }
+                            });
+                        } else if (res.error_type === 'smtp') {
+                            ['detail-smtp-host', 'detail-smtp-port', 'detail-mail-username', 'detail-mail-password'].forEach(fieldId => {
+                                const input = document.getElementById(fieldId);
+                                if (input) {
+                                    input.classList.add('validation-error');
+                                    let balloonTargetId = 'detail-smtp-host';
+                                    if (document.getElementById('detail-service-type') && document.getElementById('detail-service-type').value !== 'custom') {
+                                        balloonTargetId = 'detail-mail-password';
+                                    }
+                                    if (fieldId === balloonTargetId) {
+                                        const balloon = document.createElement('div');
+                                        balloon.className = 'validation-error-balloon';
+                                        balloon.textContent = res.message;
+                                        input.parentNode.appendChild(balloon);
+                                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                }
+                            });
+                        }
                     }
                 } catch (err) {
                     console.error('Error saving external mail account:', err);
                 }
             });
         }
+
     }
 
     function getServiceDefaults(service) {
@@ -6710,7 +7144,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const data = await res.json();
                                 if (data.success) {
                                     showToast(data.message);
-                                    await loadAddressBook();
+                                    await loadAddressBookData();
                                 } else {
                                     showToast(data.message || '삭제 실패', true);
                                 }
@@ -6737,7 +7171,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const data = await res.json();
                                 if (data.success) {
                                     showToast(data.message);
-                                    await loadAddressBook();
+                                    await loadAddressBookData();
                                 } else {
                                     showToast(data.message || '스팸 등록 실패', true);
                                 }
