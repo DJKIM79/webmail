@@ -124,12 +124,14 @@ body {
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    padding: 24px;
+    padding: 24px 0 24px 24px;
     z-index: 30;
+    overflow: hidden;
 }
 
 .sidebar-header {
     margin-bottom: 32px;
+    padding-right: 24px;
 }
 
 .logo {
@@ -167,6 +169,7 @@ body {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     transition: all var(--transition-normal);
     margin-bottom: 32px;
+    margin-right: 24px;
 }
 
 .btn-compose:hover {
@@ -184,6 +187,19 @@ body {
     flex-direction: column;
     gap: 8px;
     flex-grow: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 24px;
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+
+.sidebar-nav::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+}
+
+.sidebar-nav > * {
+    flex-shrink: 0;
 }
 
 .nav-item {
@@ -198,6 +214,7 @@ body {
     font-weight: 500;
     transition: all var(--transition-fast);
     position: relative;
+    flex-shrink: 0;
 }
 
 .nav-item i {
@@ -245,6 +262,7 @@ body {
 .sidebar-footer {
     border-top: 1px solid var(--border-color);
     padding-top: 20px;
+    padding-right: 24px;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -1926,7 +1944,7 @@ body.theme-white .table-selector-info {
     border-radius: var(--radius-md);
     font-size: 13px;
     font-weight: 600;
-    z-index: 1000;
+    z-index: 999999 !important;
     transition: opacity var(--transition-fast), transform var(--transition-fast);
     animation: slideInDown 0.2s ease-out;
 }
@@ -2070,6 +2088,7 @@ body.theme-white .table-selector-info {
     height: 44px !important;
     border-radius: var(--radius-md) !important; /* 사각형 배경 */
     margin-bottom: 24px;
+    margin-right: 0 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -2088,6 +2107,7 @@ body.theme-white .table-selector-info {
 .sidebar.collapsed .sidebar-nav {
     align-items: flex-start !important;
     width: 100%;
+    padding-right: 0 !important;
 }
 
 .sidebar.collapsed .tags-menu-container {
@@ -2119,6 +2139,7 @@ body.theme-white .table-selector-info {
 .sidebar.collapsed .sidebar-footer {
     align-items: flex-start !important;
     padding-top: 20px !important; /* 펼쳐졌을 때(20px)와 패딩 두께를 일치시켜 세로축 튐 제거 */
+    padding-right: 0 !important;
     width: 100%;
 }
 
@@ -2481,6 +2502,7 @@ body.theme-white .sidebar.collapsed .tags-menu-container .badge {
     font-weight: 500;
     font-size: 13px;
     transition: all var(--transition-fast);
+    flex-shrink: 0;
 }
 
 .tag-item i {
@@ -3311,9 +3333,16 @@ body.theme-white .btn-close-modal:hover {
     box-shadow: 0 0 10px var(--border-glow);
 }
 
-.input-group-select select option {
-    background: var(--bg-surface-solid);
-    color: var(--text-primary);
+.input-group-select select option,
+.input-group-select select optgroup {
+    background-color: var(--bg-surface-solid) !important;
+    color: var(--text-primary) !important;
+}
+
+body.theme-white .input-group-select select option,
+body.theme-white .input-group-select select optgroup {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
 }
 
 /* Groups Modal Specific Styles */
@@ -6070,9 +6099,16 @@ body.theme-white .btn-filter-action-delete:hover {
     color: var(--text-primary);
 }
 
-.custom-select-wrapper select option {
-    background-color: var(--bg-surface-solid);
-    color: var(--text-primary);
+.custom-select-wrapper select option,
+.custom-select-wrapper select optgroup {
+    background-color: var(--bg-surface-solid) !important;
+    color: var(--text-primary) !important;
+}
+
+body.theme-white .custom-select-wrapper select option,
+body.theme-white .custom-select-wrapper select optgroup {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
 }
 
 body.theme-white .custom-select-wrapper select {
@@ -6198,9 +6234,10 @@ body.theme-white .custom-select-wrapper select:focus {
     opacity: 0.6;
     cursor: not-allowed;
 }
-.external-mail-detail-pane select option {
-    background-color: var(--bg-surface-solid);
-    color: var(--text-primary);
+.external-mail-detail-pane select option,
+.external-mail-detail-pane select optgroup {
+    background-color: var(--bg-surface-solid) !important;
+    color: var(--text-primary) !important;
 }
 
 .input-grid-2x2 {
@@ -6362,9 +6399,10 @@ body.theme-white .external-mail-detail-pane select {
     border-color: #cbd5e1;
     color: #0f172a;
 }
-body.theme-white .external-mail-detail-pane select option {
-    background-color: #ffffff;
-    color: #0f172a;
+body.theme-white .external-mail-detail-pane select option,
+body.theme-white .external-mail-detail-pane select optgroup {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
 }
 body.theme-white .toggle-slider {
     background-color: rgba(0, 0, 0, 0.05);

@@ -170,6 +170,7 @@ $db->exec("CREATE TABLE IF NOT EXISTS mail_filters (
     filter_subject INTEGER DEFAULT 0,
     filter_body INTEGER DEFAULT 0,
     keywords TEXT NOT NULL,
+    match_all INTEGER DEFAULT 0,
     action TEXT NOT NULL,
     dest_folder TEXT DEFAULT NULL,
     color TEXT DEFAULT '#3b82f6',
@@ -186,6 +187,9 @@ try {
 } catch (Exception $e) {}
 try {
     $db->exec("ALTER TABLE mail_filters ADD COLUMN sort_order INTEGER DEFAULT 0");
+} catch (Exception $e) {}
+try {
+    $db->exec("ALTER TABLE mail_filters ADD COLUMN match_all INTEGER DEFAULT 0");
 } catch (Exception $e) {}
 
 // Migrate existing folder_colors if sort_order column is missing
@@ -894,15 +898,36 @@ function apply_mail_filters(string $username, PDO $db): void {
                 $match_text .= ' ' . $email_body;
             }
             
-            // Split keywords by comma or space
-            $keywords = preg_split('/[\s,]+/', trim($filter['keywords']), -1, PREG_SPLIT_NO_EMPTY);
-            $is_matched = false;
+            $match_all = isset($filter['match_all']) ? (int)$filter['match_all'] : 0;
             
-            foreach ($keywords as $kw) {
-                if (empty($kw)) continue;
-                if (mb_stripos($match_text, $kw) !== false) {
-                    $is_matched = true;
-                    break;
+            // Split keywords: if tab is present, split by tab. Otherwise split by comma/space for backward compatibility.
+            $kw_str = trim($filter['keywords'], " \n\r\0\x0B");
+            if (strpos($kw_str, "\t") !== false) {
+                $keywords = explode("\t", $kw_str);
+            } else {
+                $keywords = preg_split('/[\s,]+/', $kw_str, -1, PREG_SPLIT_NO_EMPTY);
+            }
+            $keywords = array_filter(array_map('trim', $keywords), 'strlen');
+            
+            if ($match_all) {
+                // AND mode: all keywords must match
+                $is_matched = true;
+                foreach ($keywords as $kw) {
+                    if (empty($kw)) continue;
+                    if (mb_stripos($match_text, $kw) === false) {
+                        $is_matched = false;
+                        break;
+                    }
+                }
+            } else {
+                // OR mode: any keyword can match
+                $is_matched = false;
+                foreach ($keywords as $kw) {
+                    if (empty($kw)) continue;
+                    if (mb_stripos($match_text, $kw) !== false) {
+                        $is_matched = true;
+                        break;
+                    }
                 }
             }
             
@@ -944,6 +969,138 @@ function apply_mail_filters(string $username, PDO $db): void {
             }
         }
     }
+}
+
+function apply_filter_to_inbox(string $username, array $filter, PDO $db): int {
+    $applied_count = 0;
+    
+    // We want to scan both 'new' and 'cur' directories of INBOX
+    $sub_folders = ['new', 'cur'];
+    
+    // Get filter details
+    $filter_from = $filter['filter_from'];
+    $filter_subject = $filter['filter_subject'];
+    $filter_body = $filter['filter_body'];
+    $match_all = isset($filter['match_all']) ? (int)$filter['match_all'] : 0;
+    
+    $kw_str = trim($filter['keywords'], " \n\r\0\x0B");
+    if (strpos($kw_str, "\t") !== false) {
+        $keywords = explode("\t", $kw_str);
+    } else {
+        $keywords = preg_split('/[\s,]+/', $kw_str, -1, PREG_SPLIT_NO_EMPTY);
+    }
+    $keywords = array_filter(array_map('trim', $keywords), 'strlen');
+    
+    if (empty($keywords) || (!$filter_from && !$filter_subject && !$filter_body)) {
+        return 0;
+    }
+    
+    foreach ($sub_folders as $sub) {
+        $files = secure_list_files($username, $sub);
+        foreach ($files as $file) {
+            // Read content
+            $content = secure_read_file($username, $sub, $file);
+            if (!$content) {
+                continue;
+            }
+            
+            $email = parse_email_from_content($content, $file, 'INBOX');
+            if (!$email) {
+                continue;
+            }
+            
+            $email_from = $email['from'];
+            $email_subject = $email['subject'];
+            $email_body = !empty($email['text_body']) ? $email['text_body'] : strip_tags($email['html_body']);
+            
+            $match_text = '';
+            if ($filter_from) {
+                $match_text .= ' ' . $email_from;
+            }
+            if ($filter_subject) {
+                $match_text .= ' ' . $email_subject;
+            }
+            if ($filter_body) {
+                $match_text .= ' ' . $email_body;
+            }
+            
+            // Check matches
+            if ($match_all) {
+                $is_matched = true;
+                foreach ($keywords as $kw) {
+                    if (empty($kw)) continue;
+                    if (mb_stripos($match_text, $kw) === false) {
+                        $is_matched = false;
+                        break;
+                    }
+                }
+            } else {
+                $is_matched = false;
+                foreach ($keywords as $kw) {
+                    if (empty($kw)) continue;
+                    if (mb_stripos($match_text, $kw) !== false) {
+                        $is_matched = true;
+                        break;
+                    }
+                }
+            }
+            
+            if ($is_matched) {
+                $action = $filter['action'];
+                $dest_folder = $filter['dest_folder'];
+                
+                if ($action === 'delete') {
+                    // Move to Trash
+                    if (secure_move_file($username, $sub, '.Trash/cur', $file)) {
+                        $applied_count++;
+                    }
+                } elseif ($action === 'move' && !empty($dest_folder)) {
+                    // Move to destination tag/folder
+                    $dest_sub = ($dest_folder === 'INBOX') ? 'cur' : '.' . $dest_folder . '/cur';
+                    // If moving from cur to INBOX/cur, it is a no-op, but let's avoid moving if it's already there
+                    if ($sub === 'cur' && $dest_folder === 'INBOX') {
+                        continue;
+                    }
+                    if (secure_move_file($username, $sub, $dest_sub, $file)) {
+                        $applied_count++;
+                    }
+                } elseif ($action === 'copy' && !empty($dest_folder)) {
+                    // Copy to destination tag/folder
+                    $dest_sub = ($dest_folder === 'INBOX') ? 'cur' : '.' . $dest_folder . '/cur';
+                    if ($sub === 'cur' && $dest_folder === 'INBOX') {
+                        continue;
+                    }
+                    $new_filename = time() . '.' . uniqid() . '.onto.kr:2,';
+                    if (secure_write_file($username, $dest_sub, $new_filename, $content)) {
+                        $applied_count++;
+                    }
+                } elseif ($action === 'star') {
+                    // Star (flag) the email
+                    $parts = explode(':2,', $file);
+                    $base_name = $parts[0];
+                    $flags = $parts[1] ?? '';
+                    if (strpos($flags, 'F') === false) {
+                        $flags .= 'F';
+                        $new_filename = $base_name . ':2,' . $flags;
+                        if (secure_move_file($username, $sub, $sub, $file, $new_filename)) {
+                            $applied_count++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Clear and sync cache for affected folders
+    sync_folder_cache($username, 'INBOX', $db);
+    if (!empty($filter['dest_folder']) && $filter['dest_folder'] !== 'INBOX') {
+        sync_folder_cache($username, $filter['dest_folder'], $db);
+    }
+    if ($filter['action'] === 'delete') {
+        sync_folder_cache($username, 'Trash', $db);
+    }
+    
+    return $applied_count;
 }
 
 // --- ROUTING ---
@@ -1387,7 +1544,7 @@ switch ($action) {
         }
 
         // Standard folder check
-        if (!in_array($folder, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam', 'Starred'], true) && !preg_match('/^[a-zA-Z0-9_\-\x{ac00}-\x{d7a3}\x{3130}-\x{318f}]+$/u', $folder)) {
+        if (!in_array($folder, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam', 'Starred'], true) && !preg_match('/^[\p{L}\p{N}_\- ]+$/u', $folder)) {
             respond(false, '잘못된 폴더입니다.');
         }
         
@@ -2719,8 +2876,8 @@ switch ($action) {
             respond(false, '폴더 이름을 입력하세요.');
         }
         
-        if (!preg_match('/^[\p{L}\p{N}_\-]+$/u', $tag_name)) {
-            respond(false, '폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-)만 가능합니다.');
+        if (!preg_match('/^[\p{L}\p{N}_\- ]+$/u', $tag_name)) {
+            respond(false, '폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-), 공백만 가능합니다.');
         }
         
         $folder_path = '.' . $tag_name;
@@ -2747,8 +2904,8 @@ switch ($action) {
             respond(false, '기본 폴더는 삭제할 수 없습니다.');
         }
         
-        if (!preg_match('/^[\p{L}\p{N}_\-]+$/u', $tag_name)) {
-            respond(false, '폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-)만 가능합니다.');
+        if (!preg_match('/^[\p{L}\p{N}_\- ]+$/u', $tag_name)) {
+            respond(false, '폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-), 공백만 가능합니다.');
         }
         
         $folder_path = '.' . $tag_name;
@@ -2759,6 +2916,48 @@ switch ($action) {
             respond(true, '개인 폴더가 삭제되었습니다.');
         } else {
             respond(false, '개인 폴더 삭제에 실패했습니다.');
+        }
+        break;
+
+    case 'rename_tag':
+        check_auth();
+        $username = $_SESSION['username'];
+        $old_name = trim($_POST['old_name'] ?? '');
+        $new_name = trim($_POST['new_name'] ?? '');
+        
+        if (empty($old_name) || empty($new_name)) {
+            respond(false, '폴더 이름을 입력하세요.');
+        }
+        
+        if (in_array($old_name, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam'], true) || 
+            in_array($new_name, ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam'], true)) {
+            respond(false, '기본 폴더는 이름을 수정할 수 없습니다.');
+        }
+        
+        if (!preg_match('/^[\p{L}\p{N}_\- ]+$/u', $new_name)) {
+            respond(false, '폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-), 공백만 가능합니다.');
+        }
+        
+        $old_path = '.' . $old_name;
+        $new_path = '.' . $new_name;
+        
+        $cmd = "sudo /usr/local/bin/manage_mail_files.sh rename_tag " . escapeshellarg($username) . " " . escapeshellarg($old_path) . " " . escapeshellarg($new_path);
+        exec($cmd, $output, $return_val);
+        
+        if ($return_val === 0) {
+            // Update database tables
+            $stmt = $db->prepare("UPDATE folder_colors SET folder_name = :new_name WHERE username = :username AND folder_name = :old_name");
+            $stmt->execute([':new_name' => $new_name, ':username' => $username, ':old_name' => $old_name]);
+            
+            $stmt = $db->prepare("UPDATE cached_emails SET folder = :new_name WHERE username = :username AND folder = :old_name");
+            $stmt->execute([':new_name' => $new_name, ':username' => $username, ':old_name' => $old_name]);
+            
+            $stmt = $db->prepare("UPDATE mail_filters SET dest_folder = :new_name WHERE username = :username AND dest_folder = :old_name");
+            $stmt->execute([':new_name' => $new_name, ':username' => $username, ':old_name' => $old_name]);
+            
+            respond(true, '개인 폴더 이름이 성공적으로 변경되었습니다.');
+        } else {
+            respond(false, '개인 폴더 이름 변경에 실패했습니다. (동일한 이름의 폴더가 이미 존재할 수 있습니다)');
         }
         break;
 
@@ -2915,7 +3114,8 @@ switch ($action) {
         $filter_from = isset($_POST['filter_from']) ? (int)$_POST['filter_from'] : 0;
         $filter_subject = isset($_POST['filter_subject']) ? (int)$_POST['filter_subject'] : 0;
         $filter_body = isset($_POST['filter_body']) ? (int)$_POST['filter_body'] : 0;
-        $keywords = trim($_POST['keywords'] ?? '');
+        $keywords = trim($_POST['keywords'] ?? '', " \n\r\0\x0B");
+        $match_all = isset($_POST['match_all']) ? (int)$_POST['match_all'] : 0;
         $action_val = trim($_POST['action_val'] ?? '');
         $dest_folder = trim($_POST['dest_folder'] ?? '');
 
@@ -2940,7 +3140,7 @@ switch ($action) {
         $stmt->execute([':username' => $username]);
         $max_order = (int)$stmt->fetchColumn();
 
-        $stmt = $db->prepare("INSERT INTO mail_filters (username, title, filter_from, filter_subject, filter_body, keywords, action, dest_folder, sort_order) VALUES (:username, :title, :filter_from, :filter_subject, :filter_body, :keywords, :action, :dest_folder, :sort_order)");
+        $stmt = $db->prepare("INSERT INTO mail_filters (username, title, filter_from, filter_subject, filter_body, keywords, match_all, action, dest_folder, sort_order) VALUES (:username, :title, :filter_from, :filter_subject, :filter_body, :keywords, :match_all, :action, :dest_folder, :sort_order)");
         $stmt->execute([
             ':username' => $username,
             ':title' => $title,
@@ -2948,12 +3148,14 @@ switch ($action) {
             ':filter_subject' => $filter_subject,
             ':filter_body' => $filter_body,
             ':keywords' => $keywords,
+            ':match_all' => $match_all,
             ':action' => $action_val,
             ':dest_folder' => empty($dest_folder) ? null : $dest_folder,
             ':sort_order' => $max_order + 1
         ]);
 
-        respond(true, '필터가 생성되었습니다.');
+        $new_id = (int)$db->lastInsertId();
+        respond(true, '필터가 생성되었습니다.', ['filter_id' => $new_id]);
         break;
 
     case 'update_filter':
@@ -2964,7 +3166,8 @@ switch ($action) {
         $filter_from = isset($_POST['filter_from']) ? (int)$_POST['filter_from'] : 0;
         $filter_subject = isset($_POST['filter_subject']) ? (int)$_POST['filter_subject'] : 0;
         $filter_body = isset($_POST['filter_body']) ? (int)$_POST['filter_body'] : 0;
-        $keywords = trim($_POST['keywords'] ?? '');
+        $keywords = trim($_POST['keywords'] ?? '', " \n\r\0\x0B");
+        $match_all = isset($_POST['match_all']) ? (int)$_POST['match_all'] : 0;
         $action_val = trim($_POST['action_val'] ?? '');
         $dest_folder = trim($_POST['dest_folder'] ?? '');
 
@@ -2987,7 +3190,7 @@ switch ($action) {
             respond(false, '이동 또는 복사할 보관함을 선택하세요.');
         }
 
-        $stmt = $db->prepare("UPDATE mail_filters SET title = :title, filter_from = :filter_from, filter_subject = :filter_subject, filter_body = :filter_body, keywords = :keywords, action = :action, dest_folder = :dest_folder WHERE id = :id AND username = :username");
+        $stmt = $db->prepare("UPDATE mail_filters SET title = :title, filter_from = :filter_from, filter_subject = :filter_subject, filter_body = :filter_body, keywords = :keywords, match_all = :match_all, action = :action, dest_folder = :dest_folder WHERE id = :id AND username = :username");
         $stmt->execute([
             ':id' => $filter_id,
             ':username' => $username,
@@ -2996,11 +3199,56 @@ switch ($action) {
             ':filter_subject' => $filter_subject,
             ':filter_body' => $filter_body,
             ':keywords' => $keywords,
+            ':match_all' => $match_all,
             ':action' => $action_val,
             ':dest_folder' => empty($dest_folder) ? null : $dest_folder
         ]);
 
-        respond(true, '필터가 수정되었습니다.');
+        respond(true, '필터가 수정되었습니다.', ['filter_id' => $filter_id]);
+        break;
+
+    case 'apply_filter_to_existing':
+        check_auth();
+        $username = $_SESSION['username'];
+        $filter_id = isset($_POST['filter_id']) ? (int)$_POST['filter_id'] : 0;
+        
+        if ($filter_id <= 0) {
+            respond(false, '잘못된 필터 ID입니다.');
+        }
+        
+        $stmt = $db->prepare("SELECT * FROM mail_filters WHERE id = :id AND username = :username");
+        $stmt->execute([':id' => $filter_id, ':username' => $username]);
+        $filter = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$filter) {
+            respond(false, '존재하지 않는 필터입니다.');
+        }
+        
+        $applied_count = apply_filter_to_inbox($username, $filter, $db);
+        respond(true, "기존 메일 {$applied_count}통에 필터가 적용되었습니다.", ['applied_count' => $applied_count]);
+        break;
+
+    case 'rename_filter':
+        check_auth();
+        $username = $_SESSION['username'];
+        $filter_id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
+        $title = trim($_POST['title'] ?? '');
+        
+        if ($filter_id <= 0) {
+            respond(false, '잘못된 필터 ID입니다.');
+        }
+        if (empty($title)) {
+            respond(false, '필터 제목을 입력하세요.');
+        }
+        
+        $stmt = $db->prepare("UPDATE mail_filters SET title = :title WHERE id = :id AND username = :username");
+        $stmt->execute([
+            ':id' => $filter_id,
+            ':username' => $username,
+            ':title' => $title
+        ]);
+        
+        respond(true, '필터 이름이 성공적으로 변경되었습니다.');
         break;
 
     case 'update_filter_order':

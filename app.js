@@ -468,7 +468,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --------------------------------------------------
     // CUSTOM CONFIRM DIALOG
     // --------------------------------------------------
-    function customConfirm(message, iconClass = 'fa-solid fa-circle-question', okText = '확인') {
+    function customConfirm(message, iconClass = 'fa-solid fa-circle-question', okText = '확인', cancelText = '취소') {
         return new Promise((resolve) => {
             const backdrop = document.createElement('div');
             backdrop.className = 'confirm-overlay';
@@ -482,7 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <p class="confirm-message"></p>
                 </div>
                 <div class="confirm-footer">
-                    <button type="button" class="btn-confirm-cancel">취소</button>
+                    <button type="button" class="btn-confirm-cancel">${cancelText}</button>
                     <button type="button" class="btn-confirm-ok">${okText}</button>
                 </div>
             `;
@@ -3139,12 +3139,74 @@ document.addEventListener('DOMContentLoaded', () => {
                 tr.innerHTML = `
                     <td>
                         <i class="fa-solid fa-folder tag-folder-icon-clickable" style="color: ${folderColor}; margin-right: 8px; cursor: pointer;" data-tag="${escapeHtml(tag)}"></i> 
-                        ${escapeHtml(tag)}
+                        <span class="tag-name-label" style="cursor: pointer; border-bottom: 1px dashed var(--text-secondary);" title="클릭하여 이름 수정">${escapeHtml(tag)}</span>
                     </td>
                     <td style="text-align: center;">
                         <button class="btn-tag-delete btn-danger-action" data-tag="${escapeHtml(tag)}"><i class="fa-solid fa-trash-can"></i> 삭제</button>
                     </td>
                 `;
+
+                const label = tr.querySelector('.tag-name-label');
+                label.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = tag;
+                    input.className = 'tag-name-edit-input';
+                    input.style.cssText = 'padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; width: 150px;';
+                    
+                    label.replaceWith(input);
+                    input.focus();
+                    input.select();
+                    
+                    let finished = false;
+                    
+                    const finishEdit = async () => {
+                        if (finished) return;
+                        finished = true;
+                        
+                        const newName = input.value.trim();
+                        if (!newName || newName === tag) {
+                            input.replaceWith(label);
+                            return;
+                        }
+                        
+                        if (!/^[\p{L}\p{N}_\- ]+$/u.test(newName)) {
+                            showToast('폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-), 공백만 가능합니다.');
+                            input.replaceWith(label);
+                            return;
+                        }
+                        
+                        showToast('폴더 이름 변경 중...');
+                        const r = await apiRequest('rename_tag', 'POST', { old_name: tag, new_name: newName });
+                        showToast(r.message);
+                        if (r.success) {
+                            if (state.currentFolder === tag) {
+                                setCookie('currentFolder', newName);
+                                state.currentFolder = newName;
+                            }
+                            loadTagsModalList(true);
+                            loadTags();
+                        } else {
+                            input.replaceWith(label);
+                        }
+                    };
+                    
+                    input.addEventListener('keydown', (evt) => {
+                        if (evt.key === 'Enter') {
+                            evt.preventDefault();
+                            finishEdit();
+                        } else if (evt.key === 'Escape') {
+                            finished = true;
+                            input.replaceWith(label);
+                        }
+                    });
+                    
+                    input.addEventListener('blur', () => {
+                        finishEdit();
+                    });
+                });
 
                 // Drag and Drop
                 tr.addEventListener('dragstart', (e) => {
@@ -3276,6 +3338,154 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterModalTitle = document.getElementById('filter-modal-title');
     const btnSubmitFilter = document.getElementById('btn-submit-filter');
 
+    // Filter Keywords Tagging Logic
+    const filterKeywordsContainer = document.getElementById('filter-keywords-container');
+    const filterKeywordsInput = document.getElementById('filter-keywords-input');
+    const filterKeywordsHidden = document.getElementById('filter-keywords');
+
+    function updateFilterKeywordsHidden() {
+        if (!filterKeywordsContainer || !filterKeywordsHidden) return;
+        const tags = Array.from(filterKeywordsContainer.querySelectorAll('.email-tag')).map(t => t.dataset.keyword);
+        // We always end with a tab character to clearly flag it as the new format
+        filterKeywordsHidden.value = tags.length > 0 ? tags.join('\t') + '\t' : '';
+        
+        // Update placeholder
+        if (filterKeywordsInput) {
+            const hasTags = tags.length > 0;
+            if (hasTags) {
+                if (!filterKeywordsInput.dataset.placeholder) {
+                    filterKeywordsInput.dataset.placeholder = filterKeywordsInput.placeholder;
+                }
+                filterKeywordsInput.placeholder = '';
+            } else {
+                if (filterKeywordsInput.dataset.placeholder) {
+                    filterKeywordsInput.placeholder = filterKeywordsInput.dataset.placeholder;
+                }
+            }
+        }
+    }
+
+    function addFilterKeywordTag(keyword) {
+        if (!filterKeywordsContainer) return false;
+        keyword = keyword.trim();
+        if (!keyword) return false;
+
+        // Prevent duplicates
+        const existingTags = Array.from(filterKeywordsContainer.querySelectorAll('.email-tag')).map(t => t.dataset.keyword);
+        if (existingTags.includes(keyword)) return true;
+
+        const tag = document.createElement('div');
+        tag.className = 'email-tag';
+        tag.dataset.keyword = keyword;
+        tag.innerHTML = `
+            <span>${escapeHtml(keyword)}</span>
+            <span class="tag-remove" title="삭제"><i class="fa-solid fa-xmark"></i></span>
+        `;
+
+        tag.querySelector('.tag-remove').addEventListener('click', (e) => {
+            e.stopPropagation();
+            tag.remove();
+            updateFilterKeywordsHidden();
+        });
+
+        if (filterKeywordsInput) {
+            filterKeywordsContainer.insertBefore(tag, filterKeywordsInput);
+        } else {
+            filterKeywordsContainer.appendChild(tag);
+        }
+        updateFilterKeywordsHidden();
+        return true;
+    }
+
+    function clearFilterKeywordsTags() {
+        if (!filterKeywordsContainer) return;
+        filterKeywordsContainer.querySelectorAll('.email-tag').forEach(t => t.remove());
+        if (filterKeywordsHidden) filterKeywordsHidden.value = '';
+        if (filterKeywordsInput) {
+            filterKeywordsInput.value = '';
+            if (filterKeywordsInput.dataset.placeholder) {
+                filterKeywordsInput.placeholder = filterKeywordsInput.dataset.placeholder;
+            }
+        }
+    }
+
+    window.clearFilterKeywordsTags = clearFilterKeywordsTags; // Expose to window/global if needed, but local is fine.
+
+    function loadFilterKeywordsTags(keywordStr) {
+        clearFilterKeywordsTags();
+        keywordStr = (keywordStr || '').trim();
+        if (!keywordStr) return;
+
+        let keywordsArray = [];
+        if (keywordStr.includes('\t')) {
+            keywordsArray = keywordStr.split('\t');
+        } else {
+            // Fallback for older filters created with comma/space
+            keywordsArray = keywordStr.split(/[,\s]+/).filter(Boolean);
+        }
+
+        keywordsArray.forEach(kw => {
+            addFilterKeywordTag(kw);
+        });
+    }
+
+    window.loadFilterKeywordsTags = loadFilterKeywordsTags;
+
+    // Initialize events for keyword container click and input keydowns
+    if (filterKeywordsContainer && filterKeywordsInput) {
+        filterKeywordsContainer.addEventListener('click', () => {
+            filterKeywordsInput.focus();
+        });
+
+        filterKeywordsInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab' || e.key === 'Enter') {
+                const val = filterKeywordsInput.value.trim();
+                if (val) {
+                    if (addFilterKeywordTag(val)) {
+                        e.preventDefault();
+                        filterKeywordsInput.value = '';
+                    }
+                } else {
+                    // If Tab is pressed but input is empty, let it focus the next element
+                    if (e.key === 'Tab') {
+                        // Allow normal focus behavior
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                    }
+                }
+            } else if (e.key === 'Backspace' && !filterKeywordsInput.value) {
+                const tags = filterKeywordsContainer.querySelectorAll('.email-tag');
+                if (tags.length > 0) {
+                    tags[tags.length - 1].remove();
+                    updateFilterKeywordsHidden();
+                }
+            }
+        });
+        
+        filterKeywordsInput.addEventListener('input', (e) => {
+            let value = e.target.value;
+            // If it contains tabs, handle them immediately (e.g. on paste)
+            if (value.includes('\t')) {
+                const parts = value.split('\t');
+                const last = parts.pop();
+                parts.forEach(p => {
+                    addFilterKeywordTag(p);
+                });
+                e.target.value = last;
+            }
+        });
+
+        filterKeywordsInput.addEventListener('focus', () => {
+            filterKeywordsContainer.style.borderColor = 'var(--color-primary)';
+            filterKeywordsContainer.style.boxShadow = '0 0 0 2px rgba(59, 130, 246, 0.2)';
+        });
+
+        filterKeywordsInput.addEventListener('blur', () => {
+            filterKeywordsContainer.style.borderColor = 'var(--border-color)';
+            filterKeywordsContainer.style.boxShadow = 'none';
+        });
+    }
+
     let stateFilters = [];
 
     if (btnManageFilters && filtersModal) {
@@ -3320,6 +3530,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnOpenFilterCreate.addEventListener('click', async () => {
             if (filterIdInput) filterIdInput.value = '';
             if (formCreateFilter) formCreateFilter.reset();
+            clearFilterKeywordsTags();
             if (filterModalTitle) filterModalTitle.innerHTML = '<i class="fa-solid fa-plus"></i> 새 필터 추가';
             if (btnSubmitFilter) btnSubmitFilter.textContent = '추가';
             if (filterDestFolderContainer) filterDestFolderContainer.classList.add('hidden');
@@ -3352,17 +3563,30 @@ document.addEventListener('DOMContentLoaded', () => {
         formCreateFilter.addEventListener('submit', async (e) => {
             e.preventDefault();
 
+            // Commit any pending keyword text in the input field
+            const kwInput = document.getElementById('filter-keywords-input');
+            if (kwInput && kwInput.value.trim()) {
+                addFilterKeywordTag(kwInput.value.trim());
+                kwInput.value = '';
+            }
+
             const filterId = filterIdInput ? filterIdInput.value : '';
             const title = filterTitleInput ? filterTitleInput.value.trim() : '';
             const chkFrom = document.getElementById('chk-filter-from').checked;
             const chkSubject = document.getElementById('chk-filter-subject').checked;
             const chkBody = document.getElementById('chk-filter-body').checked;
-            const keywords = document.getElementById('filter-keywords').value.trim();
+            const keywords = document.getElementById('filter-keywords').value;
+            const chkMatchAll = document.getElementById('chk-filter-match-all').checked;
             const actionVal = filterActionSelect.value;
             const destFolder = filterDestFolderSelect.value;
 
             if (!chkFrom && !chkSubject && !chkBody) {
                 showToast('1. 대상 선택에서 최소 하나 이상 선택해야 합니다.');
+                return;
+            }
+
+            if (!keywords) {
+                showToast('2. 키워드를 입력해 주세요.');
                 return;
             }
 
@@ -3372,6 +3596,7 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('filter_subject', chkSubject ? '1' : '0');
             formData.append('filter_body', chkBody ? '1' : '0');
             formData.append('keywords', keywords);
+            formData.append('match_all', chkMatchAll ? '1' : '0');
             formData.append('action_val', actionVal);
             if (actionVal === 'move' || actionVal === 'copy') {
                 formData.append('dest_folder', destFolder);
@@ -3391,6 +3616,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 formCreateFilter.reset();
                 if (filterDestFolderContainer) filterDestFolderContainer.classList.add('hidden');
                 loadFiltersModalList();
+
+                const createdFilterId = res.filter_id;
+                if (createdFilterId) {
+                    setTimeout(async () => {
+                        const confirmApply = await customConfirm(
+                            '이미 받은 메일에도 필터링을 적용할까요?', 
+                            'fa-solid fa-circle-question', 
+                            '적용', 
+                            '안함'
+                        );
+                        if (confirmApply) {
+                            showToast('기존 메일에 필터 적용 중...');
+                            const applyRes = await apiRequest('apply_filter_to_existing', 'POST', {
+                                filter_id: createdFilterId
+                            });
+                            showToast(applyRes.message);
+                            if (typeof loadEmails === 'function') {
+                                loadEmails(state.currentFolder);
+                            }
+                        }
+                    }, 300);
+                }
             }
         });
     }
@@ -3522,6 +3769,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('chk-filter-subject').checked = (filterObj.filter_subject === 1);
                     document.getElementById('chk-filter-body').checked = (filterObj.filter_body === 1);
                     document.getElementById('filter-keywords').value = filterObj.keywords;
+                    loadFilterKeywordsTags(filterObj.keywords || '');
+                    const chkMatchAllEl = document.getElementById('chk-filter-match-all');
+                    if (chkMatchAllEl) chkMatchAllEl.checked = (filterObj.match_all === 1);
                     filterActionSelect.value = filterObj.action;
 
                     await loadFilterDestFolders();
@@ -3565,8 +3815,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const tagName = newTagNameInput.value.trim();
             if (!tagName) return;
             
-            if (!/^[\p{L}\p{N}_\-]+$/u.test(tagName)) {
-                showToast('폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-)만 가능합니다.');
+            if (!/^[\p{L}\p{N}_\- ]+$/u.test(tagName)) {
+                showToast('폴더 이름은 문자, 숫자, 밑줄(_), 하이픈(-), 공백만 가능합니다.');
                 return;
             }
             

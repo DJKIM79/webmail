@@ -775,7 +775,7 @@
                 </div>
 
                 <div class="form-group-filter">
-                    <label style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">1. 대상 선택 (중복 가능)</label>
+                    <label style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">필터링 대상</label>
                     <div style="display: flex; gap: 15px; margin-top: 5px;">
                         <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-primary); font-size: 14px;">
                             <input type="checkbox" id="chk-filter-from" name="filter_from" value="1"> 보낸이
@@ -790,13 +790,22 @@
                 </div>
 
                 <div class="form-group-filter">
-                    <label for="filter-keywords" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">2. 키워드 입력 (쉼표 또는 공백 구분)</label>
-                    <input type="text" id="filter-keywords" name="keywords" placeholder="예: 광고, 스팸, 회의" required autocomplete="off"
-                           style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); color: var(--text-primary); outline: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                        <label style="font-weight: bold; display: block; color: var(--text-primary); margin: 0;">키워드 입력 (탭을 눌러 추가)</label>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary); cursor: pointer; user-select: none; white-space: nowrap; flex-shrink: 0; margin: 0;">
+                            <input type="checkbox" id="chk-filter-match-all" name="match_all" value="1"> 모두 만족
+                        </label>
+                    </div>
+                    <div id="filter-keywords-container" class="email-tag-container"
+                         style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-secondary); min-height: 40px; box-sizing: border-box; cursor: text; width: 100%;">
+                        <input type="text" id="filter-keywords-input" placeholder="키워드 입력 후 Tab키를 누르세요." autocomplete="off"
+                               style="border: none !important; outline: none !important; background: transparent !important; padding: 0 !important; margin: 0 !important; flex-grow: 1 !important; min-width: 150px; color: var(--text-primary); height: 26px !important; font-size: 13px;">
+                    </div>
+                    <input type="hidden" id="filter-keywords" name="keywords" value="">
                 </div>
 
                 <div class="form-group-filter">
-                    <label for="filter-action" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">3. 실행할 작업</label>
+                    <label for="filter-action" style="font-weight: bold; margin-bottom: 5px; display: block; color: var(--text-primary);">실행할 작업</label>
                     <div class="custom-select-wrapper" style="margin-bottom: 10px;">
                         <select id="filter-action" name="action_val" required>
                             <option value="delete">삭제 (휴지통)</option>
