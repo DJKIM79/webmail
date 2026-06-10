@@ -6,8 +6,8 @@
         </linearGradient>
     </defs>
     <!-- Envelope Body -->
-    <path d="M29 7H3a3 3 0 00-3 3v13a3 3 0 003 3h26a3 3 0 003-3V10a3 3 0 00-3-3z" fill="url(#g)" />
+    <path d="M29 5H3a3 3 0 00-3 3v16a3 3 0 003 3h26a3 3 0 003-3V8a3 3 0 00-3-3z" fill="url(#g)" />
     <!-- Flap and Detail Strokes -->
-    <path d="M1 10l15 10 15-10" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-    <path d="M1 22l10-7M21 15l10 7" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" />
+    <path d="M1 8l15 12 15-12" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M1 24l10-8M21 16l10 8" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" />
 </svg>
