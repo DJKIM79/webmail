@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="app.css?v=<?php echo filemtime('app.css'); ?>">
     <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
-    <link rel="icon" type="image/x-icon" href="onto.ico">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
 </head>
 <body>
     <script>
@@ -60,7 +60,7 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
-                    <img src="onto.png" alt="OnTo" class="logo-image">
+                    <img src="favicon.svg" alt="OnTo" class="logo-image">
                     <span class="logo-text">OnTo</span>
                 </div>
             </div>
@@ -236,7 +236,7 @@
     <div id="auth-modal" class="auth-overlay hidden">
         <div class="auth-card">
             <div class="auth-header">
-                <img src="onto.png" alt="OnTo Logo" class="auth-logo">
+                <img src="favicon.svg" alt="OnTo Logo" class="auth-logo">
                 <h2>OnTo Webmail</h2>
             </div>
             <div class="auth-tabs">
